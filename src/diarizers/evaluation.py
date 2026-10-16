@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 
 import numpy as np
 from scipy import optimize
@@ -23,6 +23,17 @@ def evaluate_utterance(
   hyp_words = hyp_norm.split()
   ref_spks = [int(x) for x in alignment.speakers_transform(ref_spk.split())]
   hyp_spks = [int(x) for x in alignment.speakers_transform(hyp_spk.split())]
+
+  if ref_words and len(ref_words) != len(ref_spks):
+    raise ValueError(
+        f"ref_text ({len(ref_words)} words) and ref_spk ({len(ref_spks)} "
+        "labels) must have the same length."
+    )
+  if hyp_words and len(hyp_words) != len(hyp_spks):
+    raise ValueError(
+        f"hyp_text ({len(hyp_words)} words) and hyp_spk ({len(hyp_spks)} "
+        "labels) must have the same length."
+    )
 
   # 1. WER and WDER via Levenshtein word alignment + Hungarian matching
   wer_dist, align = alignment.levenshtein_with_edits(ref_norm, hyp_norm)
@@ -129,8 +140,13 @@ def evaluate_json_dict(
   utt_stats: List[Dict[str, Any]] = []
 
   for utt in utts:
+    if hyp_text_field not in utt:
+      raise ValueError(
+          f"Missing required field '{hyp_text_field}' in utterance "
+          f"'{utt.get('utterance_id', '')}'."
+      )
     ref_t = utt.get(ref_text_field, "")
-    hyp_t = utt.get(hyp_text_field, ref_t)
+    hyp_t = utt[hyp_text_field]
     ref_s = utt.get(ref_spk_field, "")
     hyp_s = utt.get(hyp_spk_field, utt.get("hyp_spk", ""))
     st = evaluate_utterance(ref_t, hyp_t, ref_s, hyp_s)
@@ -192,9 +208,21 @@ def bootstrap_paired_ci(
   """Computes paired bootstrap 95% CIs and two-sided p-values (A - B)."""
   if num_samples > 0:
     num_resamples = num_samples
-  n_utts = min(len(utt_stats_a), len(utt_stats_b))
+  if len(utt_stats_a) != len(utt_stats_b):
+    raise ValueError(
+        "Paired bootstrap requires equal utterance counts "
+        f"({len(utt_stats_a)} vs {len(utt_stats_b)})."
+    )
+  n_utts = len(utt_stats_a)
   if n_utts == 0:
     return {}
+
+  ids_a = [u.get("utterance_id") for u in utt_stats_a]
+  ids_b = [u.get("utterance_id") for u in utt_stats_b]
+  if any(ids_a) and any(ids_b) and ids_a != ids_b:
+    raise ValueError(
+        "Paired bootstrap utterance_id ordering mismatch between A and B."
+    )
 
   mat_a = np.array(
       [
@@ -205,7 +233,7 @@ def bootstrap_paired_ci(
               u["cpwer_den"],
               u["spk_cnt_err"],
           ]
-          for u in utt_stats_a[:n_utts]
+          for u in utt_stats_a
       ],
       dtype=np.float64,
   )
@@ -218,7 +246,7 @@ def bootstrap_paired_ci(
               u["cpwer_den"],
               u["spk_cnt_err"],
           ]
-          for u in utt_stats_b[:n_utts]
+          for u in utt_stats_b
       ],
       dtype=np.float64,
   )
@@ -261,3 +289,45 @@ def bootstrap_paired_ci(
       "WDER": _summarize(diff_wder, pt_wder_a, pt_wder_b),
       "cpWER": _summarize(diff_cpwer, pt_cpwer_a, pt_cpwer_b),
   }
+
+
+compute_utterance_metrics = evaluate_utterance
+
+
+def compute_corpus_metrics(
+    utterances_or_dict: Union[Dict[str, Any], Sequence[Dict[str, Any]]],
+    ref_text_field: str = "ref_text",
+    hyp_text_field: str = "hyp_text",
+    ref_spk_field: str = "ref_spk",
+    hyp_spk_field: str = "hyp_spk_llm",
+    bootstrap_samples: int = 0,
+    seed: int = 42,
+) -> Dict[str, Any]:
+  """Computes corpus-level micro WER, WDER, cpWER, SpkCntMAE, and CIs."""
+  if isinstance(utterances_or_dict, dict):
+    data_dict = utterances_or_dict
+  else:
+    data_dict = {"utterances": list(utterances_or_dict)}
+  res = evaluate_json_dict(
+      data_dict,
+      ref_text_field=ref_text_field,
+      hyp_text_field=hyp_text_field,
+      ref_spk_field=ref_spk_field,
+      hyp_spk_field=hyp_spk_field,
+  )
+  utts = data_dict.get("utterances", [])
+  if bootstrap_samples > 0 and utts:
+    base_eval = evaluate_json_dict(
+        data_dict,
+        ref_text_field=ref_text_field,
+        hyp_text_field=hyp_text_field,
+        ref_spk_field=ref_spk_field,
+        hyp_spk_field="hyp_spk",
+    )
+    res["bootstrap_ci"] = bootstrap_paired_ci(
+        base_eval["utterances"],
+        res["utterances"],
+        num_resamples=bootstrap_samples,
+        seed=seed,
+    )
+  return res

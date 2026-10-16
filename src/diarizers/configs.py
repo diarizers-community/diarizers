@@ -1,6 +1,9 @@
 """Pre-configured settings for Diarizers ASR, Diarization, and LLM stages."""
 
+from __future__ import annotations
+
 import dataclasses
+from typing import Optional
 
 
 SPEAKER_PREFIX = "<speaker:"
@@ -26,7 +29,8 @@ class PromptConfig:
   use_gemma_turn_template: bool = True
   use_locality_gate: bool = True
   max_local_span_words: int = 5
-  max_ghost_cluster_words: int = 12
+  max_two_spk_span_words: int = 15
+  max_ghost_cluster_words: int = 15
   overlap_words: int = 0
 
 
@@ -55,7 +59,7 @@ class DiarizationPreset:
   """Configuration preset for segmentation, speaker embeddings, clustering."""
 
   name: str = "telephony_2spk"
-  segmentation_model: str | None = DEFAULT_SEGMENTATION_MODEL
+  segmentation_model: Optional[str] = DEFAULT_SEGMENTATION_MODEL
   encoder_name: str = DEFAULT_ECAPA_MODEL
   window_frames: int = 120
   step_frames: int = 40
@@ -105,6 +109,19 @@ CALLHOME_TELEPHONY_PRESET = DiarizationPreset(
     step_frames=40,
     min_clusters=2,
     max_clusters=6,
+    p_percentile=0.70,
+    gaussian_blur_sigma=1.5,
+    eigen_threshold=0.45,
+)
+
+AMI_MEETING_PRESET = DiarizationPreset(
+    name="ami_meeting_auto",
+    segmentation_model="pyannote/segmentation-3.0",
+    encoder_name="speechbrain/spkrec-ecapa-voxceleb",
+    window_frames=200,
+    step_frames=100,
+    min_clusters=3,
+    max_clusters=5,
     p_percentile=0.70,
     gaussian_blur_sigma=1.5,
     eigen_threshold=0.45,

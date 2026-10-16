@@ -2,6 +2,7 @@
 
 import os
 from typing import Any, List, Optional, Tuple, Union
+import warnings
 import wave
 
 import numpy as np
@@ -564,6 +565,12 @@ class PyanNetSegmentation(nn.Module):
       for cand_repo, cand_file in candidates:
         try:
           dl_path = hf_hub_download(repo_id=cand_repo, filename=cand_file)
+          if cand_repo != repo_or_path:
+            warnings.warn(
+                f"Primary segmentation repo '{repo_or_path}' unavailable; "
+                f"falling back to '{cand_repo}/{cand_file}'.",
+                RuntimeWarning,
+            )
           return cls.from_pretrained(dl_path, device=device)
         except Exception:
           continue
@@ -756,7 +763,12 @@ class ECAPASpectralDiarizer:
       self._seg_mod = PyanNetSegmentation.from_pretrained(
           self.segmentation_model_spec, device=self.device
       )
-    except Exception:
+    except Exception as exc:
+      warnings.warn(
+          f"Could not load segmentation model '{self.segmentation_model_spec}'"
+          f" ({exc}); continuing without neural boundary snapping.",
+          RuntimeWarning,
+      )
       self._seg_mod = None
     return self._seg_mod
 
@@ -871,9 +883,15 @@ class ECAPASpectralDiarizer:
     else:
       chunks = []
       times = []
+      last_s = 0
       for s in range(0, num_frames - win + 1, step):
         chunks.append(fbank[s:s + win])
         times.append((s * 0.01, (s + win) * 0.01))
+        last_s = s
+      if num_frames - (last_s + win) >= max(2, step // 2):
+        tail_s = num_frames - win
+        chunks.append(fbank[tail_s:num_frames])
+        times.append((tail_s * 0.01, num_frames * 0.01))
 
     encoder = self._ensure_encoder()
     if torch is not None and isinstance(chunks[0], torch.Tensor):

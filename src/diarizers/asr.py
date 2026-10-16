@@ -27,7 +27,7 @@ from diarizers import types
 def _deduplicate_repetitions(
     words: List[str],
     max_ngram: int = 6,
-    max_repeats: int = 2,
+    max_repeats: int = 4,
 ) -> List[str]:
   """Collapses consecutive repeated n-grams from ASR hallucination loops."""
   if len(words) <= max_repeats:
@@ -214,7 +214,8 @@ class WhisperWordASR:
           decode_with_timestamps=True,
       )
 
-      for raw_str, offset in zip(decoded, b_offsets):
+      for raw_str, offset, chunk_wav in zip(decoded, b_offsets, b_chunks):
+        chunk_dur = max(0.05, len(chunk_wav) / float(sr))
         cleaned = re.sub(
             r"<\|(?!\d+\.\d+\|)[a-zA-Z0-9_]+\|>", "", raw_str
         )
@@ -225,7 +226,7 @@ class WhisperWordASR:
               alignment.normalize_text(dehyphen).split()
           )
           if seg_words:
-            dur = float(self.chunk_seconds)
+            dur = chunk_dur
             tot_c = max(1, sum(len(w) for w in seg_words))
             cur_t = offset
             for w in seg_words:
@@ -238,16 +239,16 @@ class WhisperWordASR:
 
         i = 1
         while i < len(parts):
-          t_val = float(parts[i])
+          t_val = min(float(parts[i]), chunk_dur)
           seg_text = parts[i + 1] if (i + 1) < len(parts) else ""
           if seg_text.strip():
             t_end = (
-                float(parts[i + 2])
+                min(float(parts[i + 2]), chunk_dur)
                 if (i + 2) < len(parts)
-                else min(float(self.chunk_seconds), t_val + 2.5)
+                else min(chunk_dur, t_val + 2.5)
             )
             if t_end <= t_val:
-              t_end = min(float(self.chunk_seconds), t_val + 1.0)
+              t_end = max(t_val + 0.05, min(chunk_dur, t_val + 1.0))
             dehyphen = re.sub(r"(?<=\w)-(?=\w)", " ", seg_text)
             seg_words = _deduplicate_repetitions(
                 alignment.normalize_text(dehyphen).split()

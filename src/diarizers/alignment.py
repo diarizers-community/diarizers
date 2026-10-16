@@ -144,6 +144,7 @@ def extract_text_and_spk(
     diarized_text: str,
     speaker_prefix: str = configs.SPEAKER_PREFIX,
     speaker_suffix: str = configs.SPEAKER_SUFFIX,
+    max_speaker_id: int = 20,
 ) -> Tuple[str, str]:
   """Extracts plain word sequence and speaker sequence from diarized text."""
   spk = "1"
@@ -152,18 +153,25 @@ def extract_text_and_spk(
   result_spk: List[str] = []
   for word in diarized_text.split():
     if word.startswith(speaker_prefix):
-      if not word.endswith(speaker_suffix):
-        word = word + speaker_suffix
-      extracted = word[len(speaker_prefix):-len(speaker_suffix)]
+      suf_pos = word.find(speaker_suffix, len(speaker_prefix))
+      if suf_pos != -1:
+        extracted = word[len(speaker_prefix):suf_pos]
+        trailing = word[suf_pos + len(speaker_suffix):]
+      else:
+        extracted = word[len(speaker_prefix):]
+        trailing = ""
       try:
         spk_int = int(extracted)
-        if 1 <= spk_int <= 20:
+        if 1 <= spk_int <= max_speaker_id:
           spk = str(spk_int)
           previous_spk = spk
         else:
           spk = previous_spk
       except ValueError:
         spk = previous_spk
+      if trailing:
+        result_text.append(trailing)
+        result_spk.append(spk)
     else:
       result_text.append(word)
       result_spk.append(spk)
@@ -427,7 +435,8 @@ def apply_locality_gated_speaker_transfer(
     hyp_spks: Sequence[str],
     llm_spks: Sequence[str],
     max_local_span_words: int = 5,
-    max_ghost_cluster_words: int = 12,
+    max_ghost_cluster_words: int = 15,
+    max_two_spk_span_words: int = 15,
 ) -> List[str]:
   """Applies Locality-Gated TPST (LG-TPST) to preserve monologue speakers."""
   n = len(hyp_spks)
@@ -440,56 +449,60 @@ def apply_locality_gated_speaker_transfer(
   # Align llm_raw_int to hyp_int coordinate space via Hungarian matching
   aligned_llm_int = get_oracle_speakers(llm_raw_int, llm_raw_int, hyp_int)
 
-  # Step 1: Absorb tiny ghost speaker clusters in hyp_int
   spk_counts: Dict[int, int] = {}
   for s in hyp_int:
     spk_counts[s] = spk_counts.get(s, 0) + 1
 
+  num_spks = len(spk_counts)
+  min_major = max(5, int(n * 0.005))
   ghost_thresh = (
       min(max_ghost_cluster_words, max(2, int(n * 0.01)))
-      if len(spk_counts) >= 3
+      if num_spks >= 3
       else 0
   )
-  major_spks = {s for s, c in spk_counts.items() if c > ghost_thresh}
+  major_spks = {
+      s for s, c in spk_counts.items() if c >= min_major and c > ghost_thresh
+  }
+  if not major_spks:
+    major_spks = {s for s, c in spk_counts.items() if c > ghost_thresh}
   ghost_spks = {s for s, c in spk_counts.items() if c <= ghost_thresh}
 
-  base_int = list(hyp_int)
-  if ghost_spks and len(major_spks) >= 2:
-    for idx in range(n):
-      if base_int[idx] in ghost_spks:
-        if aligned_llm_int[idx] in major_spks:
-          base_int[idx] = aligned_llm_int[idx]
-        else:
-          # Nearest major speaker in base_int
-          for offset in range(1, n):
-            if idx - offset >= 0 and base_int[idx - offset] in major_spks:
-              base_int[idx] = base_int[idx - offset]
-              break
-            if idx + offset < n and base_int[idx + offset] in major_spks:
-              base_int[idx] = base_int[idx + offset]
-              break
-
-  # Step 2: Gate contiguous modification spans by max_local_span_words
-  num_major = max(len(major_spks), len(set(base_int)))
-  span_limit = max_local_span_words if num_major >= 3 else max(
-      max_local_span_words, 20
+  # Step 1: Gate contiguous modification spans (5 words for >=3 spks, 15 for 2)
+  span_limit = (
+      max_local_span_words
+      if num_spks >= 3
+      else max(max_local_span_words, max_two_spk_span_words)
   )
-
-  result_int = list(base_int)
+  result_int = list(hyp_int)
   i = 0
   while i < n:
-    if aligned_llm_int[i] == base_int[i]:
+    if aligned_llm_int[i] == hyp_int[i]:
       i += 1
       continue
     j = i
-    while j < n and aligned_llm_int[j] != base_int[j]:
+    while j < n and aligned_llm_int[j] != hyp_int[j]:
       j += 1
     span_len = j - i
     if span_len <= span_limit:
       for k in range(i, j):
-        if not major_spks or aligned_llm_int[k] in major_spks:
+        if num_spks <= 2 or not major_spks or aligned_llm_int[k] in major_spks:
           result_int[k] = aligned_llm_int[k]
     i = j
+
+  # Step 2: Absorb tiny ghost speaker clusters in >=3 speaker conversations
+  if ghost_spks and num_spks >= 3 and len(major_spks) >= 2:
+    for idx in range(n):
+      if result_int[idx] in ghost_spks:
+        if aligned_llm_int[idx] in major_spks:
+          result_int[idx] = aligned_llm_int[idx]
+        else:
+          for offset in range(1, n):
+            if idx - offset >= 0 and result_int[idx - offset] in major_spks:
+              result_int[idx] = result_int[idx - offset]
+              break
+            if idx + offset < n and result_int[idx + offset] in major_spks:
+              result_int[idx] = result_int[idx + offset]
+              break
 
   return [str(x) for x in result_int]
 
@@ -500,7 +513,8 @@ def locality_gated_speaker_transfer(
     llm_text: Optional[str] = None,
     llm_spk: Optional[str] = None,
     max_local_span_words: int = 5,
-    max_ghost_cluster_words: int = 12,
+    max_ghost_cluster_words: int = 15,
+    max_two_spk_span_words: int = 15,
 ) -> str:
   """Transfers speakers from LLM output onto hyp_text with LG-TPST gating."""
   if llm_text is None and llm_spk is None:
@@ -516,6 +530,7 @@ def locality_gated_speaker_transfer(
         l_seq,
         max_local_span_words=max_local_span_words,
         max_ghost_cluster_words=max_ghost_cluster_words,
+        max_two_spk_span_words=max_two_spk_span_words,
     )
     return " ".join(gated)
 
@@ -537,6 +552,7 @@ def locality_gated_speaker_transfer(
       tpst_spk_str.split(),
       max_local_span_words=max_local_span_words,
       max_ghost_cluster_words=max_ghost_cluster_words,
+      max_two_spk_span_words=max_two_spk_span_words,
   )
   return " ".join(gated)
 
@@ -686,6 +702,8 @@ def reconcile_chunk_speakers_hungarian(
     chunker: Optional[UtteranceChunker] = None,
     use_locality_gate: bool = True,
     max_local_span_words: int = 5,
+    max_ghost_cluster_words: int = 15,
+    max_two_spk_span_words: int = 15,
 ) -> Tuple[str, str]:
   """Reconciles chunk-level LLM completions via TPST and Hungarian matching."""
   if not utt_words or not utt_hyp_spks:
@@ -739,6 +757,8 @@ def reconcile_chunk_speakers_hungarian(
         utt_hyp_spks,
         reconciled_raw,
         max_local_span_words=max_local_span_words,
+        max_ghost_cluster_words=max_ghost_cluster_words,
+        max_two_spk_span_words=max_two_spk_span_words,
     )
     return raw_str, " ".join(gated)
   return raw_str, raw_str

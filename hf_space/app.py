@@ -26,6 +26,28 @@ DEFAULT_GGUF_REPO = (
 )
 DEFAULT_GGUF_FILE = "DiarizationLM-Gemma-4-E4B-v1-q4_k_m.gguf"
 
+_REFINER_CACHE: dict[tuple[bool, int], diarizers.DiarizationLMRefiner] = {}
+_PIPELINE_CACHE: dict[tuple[str, bool], diarizers.DiarizersPipeline] = {}
+
+
+def _get_cached_refiner(
+    use_lg_tpst: bool,
+    max_span_words: int,
+) -> diarizers.DiarizationLMRefiner:
+  key = (bool(use_lg_tpst), int(max_span_words))
+  if key not in _REFINER_CACHE:
+    p_cfg = diarizers.PromptConfig(
+        use_locality_gate=bool(use_lg_tpst),
+        max_local_span_words=int(max_span_words),
+    )
+    _REFINER_CACHE[key] = diarizers.DiarizationLMRefiner(
+        model_path_or_repo=DEFAULT_GGUF_REPO,
+        gguf_filename=DEFAULT_GGUF_FILE,
+        backend="gguf",
+        prompt_config=p_cfg,
+    )
+  return _REFINER_CACHE[key]
+
 
 def run_text_refinement(
     diarized_input: str,
@@ -43,32 +65,23 @@ def run_text_refinement(
   if not words:
     return "", "", "No valid words found in input."
 
-  p_cfg = diarizers.PromptConfig(
-      use_locality_gate=use_lg_tpst,
-      max_local_span_words=int(max_span_words),
-  )
-
   if use_gguf_model:
-    refiner = diarizers.DiarizationLMRefiner(
-        model_path_or_repo=DEFAULT_GGUF_REPO,
-        gguf_filename=DEFAULT_GGUF_FILE,
-        backend="gguf",
-        prompt_config=p_cfg,
-    )
+    refiner = _get_cached_refiner(use_lg_tpst, int(max_span_words))
     _, lg_spks, _ = refiner.refine_utterance(words_str, spks_str)
     final_spks = lg_spks.split()
+    mode_str = "GGUF DiarizationLM + LG-TPST"
   else:
-    # Rule-based lexical turn-boundary preview when GGUF is disabled
     final_spks = diarizers.apply_locality_gated_speaker_transfer(
         hyp_spks,
         hyp_spks,
         max_local_span_words=int(max_span_words),
     )
+    mode_str = "Ghost-speaker filter only (GGUF LLM disabled)"
 
   refined_text = diarizers.create_diarized_text(words, final_spks)
   changed = sum(1 for a, b in zip(hyp_spks, final_spks) if a != b)
   summary = (
-      f"Words: {len(words)} (100% preserved via TPST) | "
+      f"Mode: {mode_str} | Words: {len(words)} (100% preserved via TPST) | "
       f"Speaker labels adjusted: {changed}/{len(words)} | "
       f"LG-TPST enabled: {use_lg_tpst} (max_span={max_span_words})"
   )
@@ -88,18 +101,23 @@ def run_audio_pipeline(
   preset_map = {
       "Fisher Telephony (2 speakers)": diarizers.FISHER_TELEPHONY_PRESET,
       "Callhome Telephony (2-6 speakers)": diarizers.CALLHOME_TELEPHONY_PRESET,
+      "AMI Meeting (3-5 speakers)": diarizers.AMI_MEETING_PRESET,
       "Meeting Multi-Speaker (2-10 speakers)": (
           diarizers.MEETING_MULTISPK_PRESET
       ),
   }
   preset = preset_map.get(preset_name, diarizers.FISHER_TELEPHONY_PRESET)
-  pipe = diarizers.DiarizersPipeline.from_pretrained(
-      asr_model="openai/whisper-large-v3-turbo",
-      diarizer_preset=preset,
-      llm_model_or_path=DEFAULT_GGUF_REPO if use_gguf_model else None,
-      llm_gguf_filename=DEFAULT_GGUF_FILE if use_gguf_model else None,
-      device="cpu",
-  )
+  cache_key = (preset.name, bool(use_gguf_model))
+  if cache_key not in _PIPELINE_CACHE:
+    _PIPELINE_CACHE[cache_key] = diarizers.DiarizersPipeline.from_pretrained(
+        asr_model="openai/whisper-large-v3-turbo",
+        diarizer_preset=preset,
+        llm_model_or_path=DEFAULT_GGUF_REPO if use_gguf_model else None,
+        llm_gguf_filename=DEFAULT_GGUF_FILE if use_gguf_model else None,
+        llm_backend="gguf" if use_gguf_model else "auto",
+        device="cpu",
+    )
+  pipe = _PIPELINE_CACHE[cache_key]
   n_spk = int(num_speakers) if int(num_speakers) > 0 else None
   transcript = pipe(audio_path, num_speakers=n_spk)
   return (
@@ -134,6 +152,7 @@ def build_demo() -> gr.Blocks:
                 choices=[
                     "Fisher Telephony (2 speakers)",
                     "Callhome Telephony (2-6 speakers)",
+                    "AMI Meeting (3-5 speakers)",
                     "Meeting Multi-Speaker (2-10 speakers)",
                 ],
                 value="Fisher Telephony (2 speakers)",

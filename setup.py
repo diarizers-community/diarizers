@@ -10,6 +10,7 @@ INSTALL_REQUIRES = [
     "numpy>=1.22.0",
     "scipy>=1.8.0",
     "soundfile>=0.12.0",
+    "safetensors>=0.4.0",
     "torch>=2.0.0",
     "transformers>=4.40.0",
     "huggingface-hub>=0.20.0",
@@ -18,6 +19,7 @@ INSTALL_REQUIRES = [
 EXTRAS_REQUIRE = {
     "llm": [
         "llama-cpp-python>=0.2.80",
+        "transformers>=5.0.0",
         "peft>=0.10.0",
         "trl>=0.8.0",
         "datasets>=2.16.0",
@@ -38,7 +40,7 @@ EXTRAS_REQUIRE = {
 
 setup(
     name="diarizers",
-    version="1.0.0",
+    version="1.0.1",
     description=(
         "Unified Open-Source ASR, Speaker Diarization, and DiarizationLM "
         "Post-Processing Pipeline"

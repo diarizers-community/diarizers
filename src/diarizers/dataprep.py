@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 import random
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Set, Union
 
 from diarizers import alignment
 
@@ -131,19 +131,26 @@ def compute_utt_oracle_and_degraded(
 
 
 def build_sft_dataset(
-    utterances: Sequence[Dict[str, Any]],
+    utterances: Union[Dict[str, Any], Sequence[Dict[str, Any]]],
     include_deg2ref: bool = True,
     use_locality_oracle: bool = True,
     max_chunk_chars: int = 4000,
+    flavor: str = "both",
 ) -> List[Dict[str, str]]:
   """Builds dual-flavor (hyp2ora + deg2ref) SFT prompt/response records."""
+  if isinstance(utterances, dict):
+    utt_list = utterances.get("utterances", [])
+  else:
+    utt_list = list(utterances)
   chunker = alignment.UtteranceChunker(
       max_input_length=max_chunk_chars,
       max_target_length=max_chunk_chars,
   )
   examples: List[Dict[str, str]] = []
+  use_hyp2ora = flavor in ("both", "hyp2ora")
+  use_deg2ref = include_deg2ref and flavor in ("both", "deg2ref")
 
-  for idx, raw_utt in enumerate(utterances):
+  for idx, raw_utt in enumerate(utt_list):
     utt = compute_utt_oracle_and_degraded(raw_utt, seed=42 + idx)
     utt_id = str(utt.get("utterance_id", f"utt_{idx}"))
 
@@ -152,7 +159,8 @@ def build_sft_dataset(
     hyp_spks = utt.get("hyp_spk", "").split()
     ora_spks = utt.get("hyp_spk_oracle", "").split()
     if (
-        hyp_words
+        use_hyp2ora
+        and hyp_words
         and len(hyp_words) == len(hyp_spks)
         and len(hyp_words) == len(ora_spks)
     ):
@@ -173,7 +181,7 @@ def build_sft_dataset(
         })
 
     # Flavor 2: deg2ref
-    if include_deg2ref:
+    if use_deg2ref:
       ref_words = utt.get("ref_text", "").split()
       deg_spks = utt.get("ref_spk_degraded", "").split()
       ref_spks = utt.get("ref_spk", "").split()

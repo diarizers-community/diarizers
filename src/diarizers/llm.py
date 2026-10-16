@@ -3,6 +3,7 @@
 from collections.abc import Callable, Sequence
 import os
 from typing import Any, Dict, List, Optional, Tuple
+import warnings
 
 from diarizers import alignment
 from diarizers import configs
@@ -18,7 +19,7 @@ class DiarizationLMRefiner:
       backend: str = "auto",
       prompt_config: configs.PromptConfig = configs.DEFAULT_PROMPT_CONFIG,
       device: str = "cpu",
-      n_ctx: int = 4096,
+      n_ctx: int = 8192,
       n_threads: int = 8,
       completion_fn: Optional[Callable[[str], str]] = None,
       model_path: Optional[str] = None,
@@ -34,6 +35,7 @@ class DiarizationLMRefiner:
     self._llm_instance: Any = None
     self._hf_tokenizer: Any = None
     self._hf_model: Any = None
+    self._warned_passthrough: bool = False
 
   def format_model_input(self, raw_prompt: str) -> str:
     """Formats chunk prompt with Gemma-4 turn template if enabled."""
@@ -80,15 +82,36 @@ class DiarizationLMRefiner:
       import torch
       import transformers
 
-      self._hf_tokenizer = transformers.AutoTokenizer.from_pretrained(
-          self.model_path_or_repo
-      )
-      self._hf_model = transformers.AutoModelForCausalLM.from_pretrained(
-          self.model_path_or_repo,
-          torch_dtype=(
-              torch.bfloat16 if self.device != "cpu" else torch.float32
-          ),
-      )
+      try:
+        self._hf_tokenizer = transformers.AutoTokenizer.from_pretrained(
+            self.model_path_or_repo
+        )
+      except AttributeError as exc:
+        raise RuntimeError(
+            f"Could not load tokenizer from '{self.model_path_or_repo}' with "
+            f"transformers {getattr(transformers, '__version__', '?')}. "
+            "Gemma 4 models require transformers>=5.0.0 for the HF backend, "
+            "or use backend='gguf' with llama-cpp-python."
+        ) from exc
+
+      dtype = torch.bfloat16 if self.device != "cpu" else torch.float32
+      try:
+        self._hf_model = transformers.AutoModelForCausalLM.from_pretrained(
+            self.model_path_or_repo,
+            torch_dtype=dtype,
+        )
+      except ValueError:
+        cls_cand = getattr(
+            transformers,
+            "Gemma4ForConditionalGeneration",
+            getattr(transformers, "AutoModelForImageTextToText", None),
+        )
+        if cls_cand is None:
+          raise
+        self._hf_model = cls_cand.from_pretrained(
+            self.model_path_or_repo,
+            torch_dtype=dtype,
+        )
       self._hf_model.to(self.device)
       self._hf_model.eval()
 
@@ -101,9 +124,19 @@ class DiarizationLMRefiner:
     formatted = self.format_model_input(raw_prompt)
 
     if self._llm_instance is not None:
+      if hasattr(self._llm_instance, "tokenize"):
+        try:
+          prompt_toks = len(
+              self._llm_instance.tokenize(formatted.encode("utf-8"))
+          )
+        except Exception:
+          prompt_toks = max(256, int(len(formatted) * 0.35))
+      else:
+        prompt_toks = max(256, int(len(formatted) * 0.35))
+      max_gen_tokens = max(1536, int(prompt_toks * 1.3))
       out = self._llm_instance(
           formatted,
-          max_tokens=1024,
+          max_tokens=max_gen_tokens,
           temperature=0.0,
           stop=[self.prompt_config.completion_suffix.strip(), "<turn|>"],
       )
@@ -119,7 +152,7 @@ class DiarizationLMRefiner:
       with torch.no_grad():
         out_ids = self._hf_model.generate(
             **inputs,
-            max_new_tokens=max(128, int(in_len * 1.2)),
+            max_new_tokens=max(256, int(in_len * 1.3)),
             do_sample=False,
             pad_token_id=self._hf_tokenizer.eos_token_id,
         )
@@ -129,6 +162,13 @@ class DiarizationLMRefiner:
       return str(comp).strip()
 
     # Identity pass-through when no LLM is configured
+    if not self._warned_passthrough:
+      warnings.warn(
+          "DiarizationLMRefiner has no model or completion_fn configured; "
+          "returning input speaker labels unchanged.",
+          RuntimeWarning,
+      )
+      self._warned_passthrough = True
     body = raw_prompt
     if body.endswith(self.prompt_config.prompt_suffix):
       body = body[:-len(self.prompt_config.prompt_suffix)]
@@ -173,6 +213,8 @@ class DiarizationLMRefiner:
         chunker=chunker,
         use_locality_gate=self.prompt_config.use_locality_gate,
         max_local_span_words=self.prompt_config.max_local_span_words,
+        max_ghost_cluster_words=self.prompt_config.max_ghost_cluster_words,
+        max_two_spk_span_words=self.prompt_config.max_two_spk_span_words,
     )
     return raw_tpst, lg_tpst, completions
 

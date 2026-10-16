@@ -94,7 +94,7 @@ def _cosine_kmeans(
     prev_mean_dist = mean_dist
     for k in range(n_clusters):
       mask = np.where(labels == k)[0]
-      if mask.any():
+      if mask.size > 0:
         centroids[k] = np.mean(spectral_embeddings[mask], axis=0)
   return labels
 

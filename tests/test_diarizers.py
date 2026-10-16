@@ -798,6 +798,82 @@ class TestASRrefinerPipelineAndEval(unittest.TestCase):
       self.assertEqual(res_bin["status"], "completed")
       self.assertTrue(os.path.isfile(out_bin))
 
+  def test_review_fixes_regression(self) -> None:
+    import diarizers
+
+    # 1. AMI_MEETING_PRESET and PromptConfig defaults
+    self.assertEqual(diarizers.AMI_MEETING_PRESET.min_clusters, 3)
+    self.assertEqual(diarizers.AMI_MEETING_PRESET.max_clusters, 5)
+    self.assertEqual(
+        diarizers.DEFAULT_PROMPT_CONFIG.max_two_spk_span_words, 15
+    )
+    self.assertEqual(
+        diarizers.DEFAULT_PROMPT_CONFIG.max_ghost_cluster_words, 15
+    )
+
+    # 2. _cosine_kmeans updates centroid when sample 0 is the only member
+    pts = np.array(
+        [[1.0, 0.0], [0.0, 1.0], [0.1, 0.99]], dtype=np.float64
+    )
+    labels_km = spectral._cosine_kmeans(pts, n_clusters=2, max_iter=10)
+    self.assertEqual(len(labels_km), 3)
+    self.assertNotEqual(labels_km[0], labels_km[1])
+    self.assertEqual(labels_km[1], labels_km[2])
+
+    # 3. extract_text_and_spk preserves attached words (<speaker:2>hello)
+    att_w, att_s = diarizers.extract_text_and_spk(
+        "<speaker:1> hi <speaker:2>hello world"
+    )
+    self.assertEqual(att_w, "hi hello world")
+    self.assertEqual(att_s, "1 2 2")
+
+    # 4. _deduplicate_repetitions preserves 3-fold repeats and collapses >=5
+    self.assertEqual(
+        asr._deduplicate_repetitions(["yeah", "yeah", "yeah"]),
+        ["yeah", "yeah", "yeah"],
+    )
+    self.assertEqual(
+        len(asr._deduplicate_repetitions(["um"] * 10)),
+        4,
+    )
+
+    # 5. compute_utterance_metrics and compute_corpus_metrics + validation
+    m_utt = diarizers.compute_utterance_metrics(
+        ref_text="hello world good morning",
+        ref_spk="1 1 2 2",
+        hyp_text="hello world good morning",
+        hyp_spk="1 1 2 2",
+    )
+    self.assertAlmostEqual(m_utt["WER"], 0.0)
+    self.assertAlmostEqual(m_utt["WDER"], 0.0)
+    self.assertAlmostEqual(m_utt["cpWER"], 0.0)
+
+    synth = dataprep.generate_synthetic_dataset(num_utterances=4, seed=9)
+    m_corp = diarizers.compute_corpus_metrics(
+        synth["utterances"], hyp_spk_field="hyp_spk_oracle"
+    )
+    self.assertIn("WER", m_corp)
+    self.assertIn("WDER", m_corp)
+    self.assertIn("cpWER", m_corp)
+
+    with self.assertRaises(ValueError):
+      evaluation.evaluate_utterance("a b", "1", "a b", "1 1")
+    with self.assertRaises(ValueError):
+      evaluation.bootstrap_paired_ci(
+          [{"utterance_id": "u1"}],
+          [{"utterance_id": "u2"}],
+      )
+
+    # 6. flavor filter in build_sft_dataset ("hyp2ora", "deg2ref", "both")
+    rows_both = dataprep.build_sft_dataset(synth, flavor="both")
+    rows_h2o = dataprep.build_sft_dataset(synth, flavor="hyp2ora")
+    rows_d2r = dataprep.build_sft_dataset(synth, flavor="deg2ref")
+    self.assertGreater(len(rows_h2o), 0)
+    self.assertGreater(len(rows_d2r), 0)
+    self.assertEqual(len(rows_both), len(rows_h2o) + len(rows_d2r))
+    self.assertTrue(all(r["flavor"] == "hyp2ora" for r in rows_h2o))
+    self.assertTrue(all(r["flavor"] == "deg2ref" for r in rows_d2r))
+
 
 if __name__ == "__main__":
   unittest.main()

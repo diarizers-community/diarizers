@@ -1,6 +1,6 @@
-"""Diarizers v1.0.0: Open-Source ASR, Speaker Diarization, and DiarizationLM."""
+"""Diarizers v1.0.1: Open-Source ASR, Speaker Diarization, and DiarizationLM."""
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 from diarizers.alignment import (
     ChunkedPromptBuilder,
@@ -25,6 +25,7 @@ from diarizers.asr import (
     turns_to_word_segments,
 )
 from diarizers.configs import (
+    AMI_MEETING_PRESET,
     ASRConfig,
     CALLHOME_TELEPHONY_PRESET,
     DEFAULT_ASR_CONFIG,
@@ -55,6 +56,8 @@ from diarizers.diarization import (
 )
 from diarizers.evaluation import (
     bootstrap_paired_ci,
+    compute_corpus_metrics,
+    compute_utterance_metrics,
     evaluate_json_dict,
     evaluate_json_file,
     evaluate_utterance,
@@ -81,6 +84,7 @@ from diarizers.types import (
 
 __all__ = [
     "__version__",
+    "AMI_MEETING_PRESET",
     "ASRConfig",
     "AudioCppASR",
     "CALLHOME_TELEPHONY_PRESET",
@@ -117,8 +121,10 @@ __all__ = [
     "bootstrap_paired_ci",
     "build_locality_preserving_oracle",
     "build_sft_dataset",
+    "compute_corpus_metrics",
     "compute_log_mel_fbank",
     "compute_utt_oracle_and_degraded",
+    "compute_utterance_metrics",
     "create_diarized_text",
     "degrade_speakers",
     "evaluate_json_dict",

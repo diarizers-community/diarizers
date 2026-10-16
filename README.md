@@ -39,7 +39,7 @@
 **`diarizers` (`v1.0.0`)** is a unified, self-contained **Apache-2.0** Python library and CLI for end-to-end **speaker-attributed automatic speech recognition (ASR + Speaker Diarization + DiarizationLM Post-Processing)**, as well as training and evaluating custom DiarizationLM models.
 
 It combines:
-1. **Word-Timestamped Open-Source ASR (`diarizers.asr`)**: Defaulting to [`openai/whisper-large-v3-turbo`](https://huggingface.co/openai/whisper-large-v3-turbo) (MIT License) with cross-attention DTW word-level timestamps (and also supporting `Qwen/Qwen3-ASR` GGUF via `audio.cpp`, Apache-2.0 License, or precomputed word segments).
+1. **Word-Timestamped Open-Source ASR (`diarizers.asr`)**: Defaulting to [`openai/whisper-large-v3-turbo`](https://huggingface.co/openai/whisper-large-v3-turbo) (MIT License) with segment-level timestamp decoding and character-proportional word timestamp interpolation (and also supporting `Qwen/Qwen3-ASR` GGUF via `audio.cpp`, Apache-2.0 License, or precomputed word segments).
 2. **Neural Speaker Turn Segmentation + Speaker Embeddings + Spectral Clustering (`diarizers.diarization` & `diarizers.spectral`)**:
    - Standalone pure-PyTorch implementation of [`pyannote/segmentation-3.0`](https://huggingface.co/pyannote/segmentation-3.0) (`PyanNetSegmentation`: SincNet + 4-layer BiLSTM + 7-class powerset classifier, MIT License, with automatic fallback to un-gated MIT mirrors such as [`diarizers-community/speaker-segmentation-fine-tuned-callhome-eng`](https://huggingface.co/diarizers-community/speaker-segmentation-fine-tuned-callhome-eng)) for local speaker-change flux boundary snapping.
    - Standalone pure-PyTorch implementation of [`speechbrain/spkrec-ecapa-voxceleb`](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb) (`SpeechBrainECAPATDNN`, Apache-2.0 License) with exact HTK decibel-scaled (`10 * log10`) 80-bin log-mel filterbanks, global embedding mean subtraction (`mean_var_norm_emb.ckpt`), and recording-level channel centering.
@@ -102,7 +102,7 @@ In the 2024 experimental `DiarizersLM` prototype (`distil-whisper/distil-large-v
    - Furthermore, 8 kHz narrowband telephone audio upsampled to 16 kHz introduces a shared channel offset vector across all windows of a call.
    - `diarizers.diarization.ECAPASpectralDiarizer` combines standalone PyTorch `pyannote/segmentation-3.0` (`PyanNetSegmentation` neural powerset segmentation, MIT License) with `SpeechBrainECAPATDNN` (exact HTK dB filterbank scaling, `glob_mean` subtraction, and **recording-level embedding centering** `embs -= embs.mean(axis=0)`) and clusters via **Symmetric Normalized Laplacian Spectral Clustering** (`L_sym = I - D^{-1/2} W D^{-1/2}`) with Gaussian temporal smoothing and calibrated eigengap speaker count estimation (`eigen_threshold=0.45`). Pure sliding-window `ECAPA-TDNN + SpectralClusterer` (without neural segmentation) also remains available via `segmentation_model="none"`.
 5. **Inter-Chunk Speaker Permutation Flips**: Long transcripts segmented into 4,000-character LLM prompts previously suffered independent speaker label permutations (`1 <-> 2`) across chunks. `diarizers.alignment.ChunkedPromptBuilder` uses overlapping word windows and **Hungarian (`scipy.optimize.linear_sum_assignment`) inter-chunk reconciliation**.
-6. **LLM Monologue Speaker Drift & Ghost Speaker Hallucinations**: Autoregressive LLMs occasionally invent a spurious `<speaker:3>` in a 2-speaker conversation or flip a speaker label across a 200-word monologue. `diarizers.alignment.locality_gated_speaker_transfer` (**`LG-TPST`**) absorbs ghost clusters (`<= 12` words) into adjacent dominant speakers, gates long-span (`> 5` words) monologue flips, and uses **Myers' (1999) bit-parallel exact word-level Levenshtein Transcript-Preserving Speaker Transfer (`TPST`)** so `WER` is mathematically invariant before and after LLM post-processing.
+6. **LLM Monologue Speaker Drift & Ghost Speaker Hallucinations**: Autoregressive LLMs occasionally invent a spurious `<speaker:3>` in a 2-speaker conversation or flip a speaker label across a 200-word monologue. `diarizers.alignment.locality_gated_speaker_transfer` (**`LG-TPST`**) absorbs ghost clusters (`<= 15` words in `>= 3`-speaker meetings) into dominant speakers, gates long-span monologue flips (`> 5` words in `>= 3`-speaker meetings and `> 15` words in `2`-speaker conversations), and uses **Myers' (1999) bit-parallel exact word-level Levenshtein Transcript-Preserving Speaker Transfer (`TPST`)** so `WER` is mathematically invariant before and after LLM post-processing.
 
 ---
 
@@ -117,40 +117,40 @@ All metrics below are **micro-averaged** across the full evaluation splits (`172
 Open-source pipeline configuration:
 - **ASR**: [`openai/whisper-large-v3-turbo`](https://huggingface.co/openai/whisper-large-v3-turbo) (`WhisperWordASR`, MIT License)
 - **Speaker Diarization**: [`pyannote/segmentation-3.0`](https://huggingface.co/pyannote/segmentation-3.0) (`PyanNetSegmentation`, MIT License) + [`speechbrain/spkrec-ecapa-voxceleb`](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb) (`SpeechBrainECAPATDNN`, Apache-2.0 License) + `SpectralClusterer` (`eigen_threshold=0.45`, Apache-2.0 License)
-- **DiarizationLM**: [`diarizers-community/DiarizationLM-Gemma-4-E4B-v1`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v1) (Apache-2.0 License)
+- **DiarizationLM**: [`diarizers-community/DiarizationLM-Gemma-4-E4B-v1`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v1) (Apache-2.0 License; evaluated in full-precision `bfloat16` on TPU with `max_new_tokens = 1.2x` input tokens and `6,000`-character chunk windows; local CPU inference uses 4-bit `Q4_K_M` GGUF via `llama.cpp` with `max_tokens = 1.3x` prompt tokens and `4,000`-character default chunk windows)
 
 | Benchmark (Full Test Split) | Utterances | Pipeline / System | WER (%) | WDER (%) | cpWER (%) | SpkCntMAE |
 | :--- | :---: | :--- | :---: | :---: | :---: | :---: |
 | **Fisher English** | 172 | Legacy 2024 `DiarizersLM` (`distil-large-v3` + `pyannote-3.1`) | 20.69 | 43.99 | 56.10 | — |
-| **Fisher English** | 172 | `diarizers` v1.0.0 Open Frontend (`Whisper-large-v3-turbo` + `pyannote/seg-3.0` + `ECAPA-TDNN` + `SpectralClusterer`) | **20.80** | **4.35** *(raw 4.45)* | **24.78** *(Oracle 20.46)* | **0.000** |
-| **Fisher English** | 172 | `diarizers` v1.0.0 + **`DiarizationLM-Gemma-4-E4B-v1` (`LG-TPST`)** | **20.80** | **2.59** | **21.91** | **0.000** |
-| **Fisher English** | 172 | `diarizers` v1.0.0 + **`DiarizationLM-Gemma-4-E4B-v1` (`Raw-TPST`)** | **20.80** | **2.65** | **21.99** | **0.000** |
-| **CALLHOME English** | 20 | `diarizers` v1.0.0 Open Frontend (Auto Speaker Count `[2..6]`, `eigen_threshold=0.45`) | **21.25** | **9.42** *(raw 9.47)* | **32.42** *(Oracle 21.08)* | **0.050** |
+| **Fisher English** | 172 | `diarizers` v1.0.0 Open Frontend (`FISHER_TELEPHONY_PRESET`, Fixed Speaker Count `K=2`) | **20.80** | **4.35** *(raw 4.45)* | **24.78** *(Oracle 20.46)* | **0.000** *(fixed K=2)* |
+| **Fisher English** | 172 | `diarizers` v1.0.0 + **`DiarizationLM-Gemma-4-E4B-v1` (`LG-TPST`)** | **20.80** | **2.59** | **21.91** | **0.000** *(fixed K=2)* |
+| **Fisher English** | 172 | `diarizers` v1.0.0 + **`DiarizationLM-Gemma-4-E4B-v1` (`Raw-TPST`)** | **20.80** | **2.65** | **21.99** | **0.000** *(fixed K=2)* |
+| **CALLHOME English** | 20 | `diarizers` v1.0.0 Open Frontend (`CALLHOME_TELEPHONY_PRESET`, Auto Speaker Count `[2..6]`, `eigen_threshold=0.45`) | **21.25** | **9.42** *(raw 9.47)* | **32.42** *(Oracle 21.08)* | **0.050** |
 | **CALLHOME English** | 20 | `diarizers` v1.0.0 + **`DiarizationLM-Gemma-4-E4B-v1` (`LG-TPST`)** | **21.25** | **5.98** | **27.69** | **0.050** |
 | **CALLHOME English** | 20 | `diarizers` v1.0.0 + **`DiarizationLM-Gemma-4-E4B-v1` (`Raw-TPST`)** | **21.25** | **4.89** | **25.91** | **0.050** |
-| **ICSI Meeting Corpus** | 3 | `diarizers` v1.0.0 Open Frontend (Auto Speaker Count `[2..10]`, `eigen_threshold=0.45`) | **35.29** | **23.48** *(raw 23.58)* | **48.97** *(Oracle 34.97)* | **3.333** |
+| **ICSI Meeting Corpus** | 3 | `diarizers` v1.0.0 Open Frontend (`MEETING_MULTISPK_PRESET`, Auto Speaker Count `[2..10]`, `eigen_threshold=0.45`) | **35.29** | **23.48** *(raw 23.58)* | **48.97** *(Oracle 34.97)* | **3.333** |
 | **ICSI Meeting Corpus** | 3 | `diarizers` v1.0.0 + **`DiarizationLM-Gemma-4-E4B-v1` (`LG-TPST`)** | **35.29** | **23.10** | **48.62** | **3.333** |
 | **ICSI Meeting Corpus** | 3 | `diarizers` v1.0.0 + **`DiarizationLM-Gemma-4-E4B-v1` (`Raw-TPST`)** | **35.29** | **23.11** | **48.63** | **3.333** |
 | **AMI (`Mix-Headset`)** | 16 | Legacy 2024 `DiarizersLM` (`distil-large-v3` + `pyannote-3.1`) | — | 56.79 | — | — |
-| **AMI (`Mix-Headset`)** | 16 | `diarizers` v1.0.0 Open Frontend (Auto Speaker Count `[2..10]`, `eigen_threshold=0.45`) | **29.14** | **20.68** *(raw 20.80)* | **46.07** *(Oracle 28.70)* | **0.688** |
+| **AMI (`Mix-Headset`)** | 16 | `diarizers` v1.0.0 Open Frontend (`AMI_MEETING_PRESET`, Auto Speaker Count `[3..5]`, `eigen_threshold=0.45`) | **29.14** | **20.68** *(raw 20.80)* | **46.07** *(Oracle 28.70)* | **0.688** |
 | **AMI (`Mix-Headset`)** | 16 | `diarizers` v1.0.0 + **`DiarizationLM-Gemma-4-E4B-v1` (`LG-TPST`)** | **29.14** | **20.14** | **45.56** | **0.688** |
 | **AMI (`Mix-Headset`)** | 16 | `diarizers` v1.0.0 + **`DiarizationLM-Gemma-4-E4B-v1` (`Raw-TPST`)** | **29.14** | **20.13** | **45.53** | **0.688** |
 
 **Key Takeaways:**
-- On **Fisher (172 sessions)**, `diarizers` (`v1.0.0`) reduces WDER from `43.99%` (2024 prototype) to **`4.35%`** before the LLM, and **`DiarizationLM-Gemma-4-E4B-v1` reduces WDER by a further `-40.5%` relative down to `2.59%`** (`cpWER` drops from `24.78%` to **`21.91%`**, within `1.45%` of the `20.46%` Hungarian oracle cpWER ceiling).
+- On **Fisher (172 sessions, 2-speaker telephone calls with `K=2`)**, `diarizers` (`v1.0.0`) reduces WDER from `43.99%` (2024 prototype) to **`4.35%`** before the LLM, and **`DiarizationLM-Gemma-4-E4B-v1` reduces WDER by a further `-40.5%` relative down to `2.59%`** (`cpWER` drops from `24.78%` to **`21.91%`**, within `1.45%` of the `20.46%` Hungarian oracle cpWER ceiling).
 - On **CALLHOME-English (20 calls, unknown speaker count `2–6`)**, `diarizers` (`v1.0.0`) achieves `9.42%` pre-LLM WDER (`0.050` SpkCntMAE), and **`DiarizationLM-Gemma-4-E4B-v1` reduces WDER by `-48.1%` relative down to `4.89%` (`Raw-TPST`) / `5.98%` (`LG-TPST`)**, cutting `cpWER` by `-6.51` percentage points (`32.42% -> 25.91%`).
-- On **AMI (`Mix-Headset`, 16 meetings)** and **ICSI (3 meetings)**, `diarizers` (`v1.0.0`) reduces AMI WDER from `56.79%` (2024 prototype) to **`20.68%`** (`20.13%` post-LLM) and ICSI WDER to **`23.48%`** (`23.10%` post-LLM).
+- On **AMI (`Mix-Headset`, 16 meetings, speaker bounds `[3..5]`)** and **ICSI (3 meetings, speaker bounds `[2..10]`)**, `diarizers` (`v1.0.0`) reduces AMI WDER from `56.79%` (2024 prototype) to **`20.68%`** (`20.13%` post-LLM) and ICSI WDER to **`23.48%`** (`23.10%` post-LLM).
 
 ### Table 2: USM + Turn-to-Diarize Frontend + `DiarizationLM-Gemma-4-E4B-v1`
 
-For reference, below is the performance of [`diarizers-community/DiarizationLM-Gemma-4-E4B-v1`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v1) on the exact same 211 test recordings when paired with the USM ASR and Turn-to-Diarize frontend (with 95% bootstrap confidence intervals over `B = 10,000` conversation resamples):
+For reference, below is the performance of [`diarizers-community/DiarizationLM-Gemma-4-E4B-v1`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v1) on the exact same 211 test recordings when paired with the USM ASR and Turn-to-Diarize frontend (with 95% bootstrap confidence intervals over `B = 10,000` conversation resamples; note that `0/10,000` bootstrap resamples had `ΔWDER >= 0`, and ICSI has `n = 3` meetings):
 
-| Benchmark | Test Split | WER (%) | System | WDER (%) [95% CI] | cpWER (%) [95% CI] | SpkCntMAE [95% CI] | Paired ΔWDER vs. Baseline (p-value) |
+| Benchmark | Test Split | WER (%) | System | WDER (%) [95% CI] | cpWER (%) [95% CI] | SpkCntMAE [95% CI] | Paired ΔWDER vs. Baseline |
 | :--- | :--- | :---: | :--- | :---: | :---: | :---: | :---: |
-| **Fisher** | TEST FULL (172 sessions) | 15.37 | Baseline (USM + Turn-to-Diarize)<br>`DiarizationLM-8b-Fisher-v2` (Llama 3 8B)<br>**`DiarizationLM-Gemma-4-E4B-v1` (4B)** | 5.32 [4.93, 5.74]<br>3.28<br>**2.99 [2.65, 3.37]** | 20.88 [19.97, 21.88]<br>18.37<br>**17.62 [16.76, 18.56]** | 0.215 [0.151, 0.291]<br>—<br>**0.093 [0.047, 0.145]** | —<br>—<br>**-2.33% [-2.51, -2.16]** (p < 0.0001) |
-| **CALLHOME** | TEST FULL (20 calls) | 15.22 | Baseline (USM + Turn-to-Diarize)<br>`DiarizationLM-8b-Fisher-v2` (Llama 3 8B)<br>**`DiarizationLM-Gemma-4-E4B-v1` (4B)** | 7.74 [6.07, 9.65]<br>6.66<br>**4.92 [3.46, 6.75]** | 24.31 [21.27, 27.43]<br>23.57<br>**20.69 [17.98, 23.66]** | 0.050 [0.000, 0.150]<br>—<br>**0.000 [0.000, 0.000]** | —<br>—<br>**-2.82% [-3.48, -2.14]** (p < 0.0001) |
-| **ICSI** | TEST FULL (3 meetings) | 29.42 | Baseline (USM + Turn-to-Diarize)<br>**`DiarizationLM-Gemma-4-E4B-v1` (4B)** | 14.70 [11.65, 20.29]<br>**14.10 [10.77, 19.94]** | 43.90 [39.10, 51.67]<br>**43.32 [38.38, 51.20]** | 0.333 [0.000, 1.000]<br>**0.333 [0.000, 1.000]** | —<br>**-0.60% [-0.88, -0.35]** (p < 0.0001) |
-| **AMI** | TEST WORD FULL (16 meetings) | 24.33 | Baseline (USM + Turn-to-Diarize)<br>**`DiarizationLM-Gemma-4-E4B-v1` (4B)** | 15.68 [10.64, 21.11]<br>**14.89 [9.80, 20.38]** | 40.32 [32.43, 48.00]<br>**39.57 [31.57, 47.29]** | 0.500 [0.188, 0.812]<br>**0.438 [0.188, 0.750]** | —<br>**-0.79% [-1.00, -0.60]** (p < 0.0001) |
+| **Fisher** | TEST FULL (172 sessions) | 15.37 | Baseline (USM + Turn-to-Diarize)<br>`DiarizationLM-8b-Fisher-v2` (Llama 3 8B)<br>**`DiarizationLM-Gemma-4-E4B-v1` (4B)** | 5.32 [4.93, 5.74]<br>3.28<br>**2.99 [2.65, 3.37]** | 20.88 [19.97, 21.88]<br>18.37<br>**17.62 [16.76, 18.56]** | 0.215 [0.151, 0.291]<br>—<br>**0.093 [0.047, 0.145]** | —<br>—<br>**-2.33% [-2.51, -2.16]** (0/10,000 ≥ 0) |
+| **CALLHOME** | TEST FULL (20 calls) | 15.22 | Baseline (USM + Turn-to-Diarize)<br>`DiarizationLM-8b-Fisher-v2` (Llama 3 8B)<br>**`DiarizationLM-Gemma-4-E4B-v1` (4B)** | 7.74 [6.07, 9.65]<br>6.66<br>**4.92 [3.46, 6.75]** | 24.31 [21.27, 27.43]<br>23.57<br>**20.69 [17.98, 23.66]** | 0.050 [0.000, 0.150]<br>—<br>**0.000 [0.000, 0.000]** | —<br>—<br>**-2.82% [-3.48, -2.14]** (0/10,000 ≥ 0) |
+| **ICSI** | TEST FULL (3 meetings) | 29.42 | Baseline (USM + Turn-to-Diarize)<br>**`DiarizationLM-Gemma-4-E4B-v1` (4B)** | 14.70 [11.65, 20.29]<br>**14.10 [10.77, 19.94]** | 43.90 [39.10, 51.67]<br>**43.32 [38.38, 51.20]** | 0.333 [0.000, 1.000]<br>**0.333 [0.000, 1.000]** | —<br>**-0.60% [-0.88, -0.35]** (n = 3) |
+| **AMI** | TEST WORD FULL (16 meetings) | 24.33 | Baseline (USM + Turn-to-Diarize)<br>**`DiarizationLM-Gemma-4-E4B-v1` (4B)** | 15.68 [10.64, 21.11]<br>**14.89 [9.80, 20.38]** | 40.32 [32.43, 48.00]<br>**39.57 [31.57, 47.29]** | 0.500 [0.188, 0.812]<br>**0.438 [0.188, 0.750]** | —<br>**-0.79% [-1.00, -0.60]** (0/10,000 ≥ 0) |
 
 ---
 
@@ -205,7 +205,7 @@ print(transcript.to_srt())                            # SubRip (.srt) subtitles 
 print(transcript.to_vtt())                            # WebVTT (.vtt) subtitles
 ```
 
-To run on a **CUDA GPU** with 16-bit `bfloat16` Hugging Face `transformers` weights:
+To run on a **CUDA GPU** with 16-bit `bfloat16` Hugging Face `transformers` weights *(requires `transformers>=5.0.0` for `gemma4` architecture support)*:
 
 ```python
 pipe_gpu = diarizers.DiarizersPipeline.from_pretrained(

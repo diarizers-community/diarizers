@@ -49,6 +49,7 @@ class DiarizersPipeline:
           use_gemma_turn_template=prompt_config.use_gemma_turn_template,
           use_locality_gate=use_locality_gate,
           max_local_span_words=prompt_config.max_local_span_words,
+          max_two_spk_span_words=prompt_config.max_two_spk_span_words,
           max_ghost_cluster_words=prompt_config.max_ghost_cluster_words,
           overlap_words=prompt_config.overlap_words,
       )
@@ -65,6 +66,7 @@ class DiarizersPipeline:
       segmentation_model: Optional[str] = "default",
       llm_model_or_path: Optional[str] = None,
       llm_gguf_filename: Optional[str] = None,
+      llm_backend: str = "auto",
       device: str = "cpu",
       use_locality_gate: bool = True,
   ) -> "DiarizersPipeline":
@@ -82,6 +84,7 @@ class DiarizersPipeline:
         llm_lib.DiarizationLMRefiner(
             model_path_or_repo=llm_model_or_path,
             gguf_filename=llm_gguf_filename,
+            backend=llm_backend,
             prompt_config=p_cfg,
             device=device,
         )

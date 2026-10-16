@@ -6,10 +6,19 @@ import os
 import sys
 from typing import List, Optional
 
+from diarizers import configs
 from diarizers import dataprep
 from diarizers import evaluation
 from diarizers import llm
 from diarizers import pipeline
+
+_PRESET_MAP = {
+    "telephony": configs.FISHER_TELEPHONY_PRESET,
+    "fisher": configs.FISHER_TELEPHONY_PRESET,
+    "callhome": configs.CALLHOME_TELEPHONY_PRESET,
+    "ami": configs.AMI_MEETING_PRESET,
+    "meeting": configs.MEETING_MULTISPK_PRESET,
+}
 
 
 def _cmd_prepare_data(args: argparse.Namespace) -> None:
@@ -31,8 +40,10 @@ def _cmd_prepare_data(args: argparse.Namespace) -> None:
     data = json.load(f)
   sft_rows = dataprep.build_sft_dataset(
       data.get("utterances", []),
-      include_deg2ref=True,
+      include_deg2ref=args.flavor in ("both", "deg2ref"),
       use_locality_oracle=not args.no_locality_oracle,
+      max_chunk_chars=args.max_chunk_chars,
+      flavor=args.flavor,
   )
   os.makedirs(
       os.path.dirname(os.path.abspath(args.output_json)), exist_ok=True
@@ -87,6 +98,8 @@ def _cmd_infer(args: argparse.Namespace) -> None:
       data = json.load(f)
     refiner = llm.DiarizationLMRefiner(
         model_path_or_repo=args.llm_model,
+        gguf_filename=args.gguf_file,
+        backend=args.llm_backend,
         device=args.device,
     )
     refined = refiner.refine_json_dict(data)
@@ -101,17 +114,44 @@ def _cmd_infer(args: argparse.Namespace) -> None:
 
   if not args.audio:
     raise ValueError("Provide --audio or --input_json.")
+  preset = _PRESET_MAP.get(
+      args.preset.lower(), configs.FISHER_TELEPHONY_PRESET
+  )
   pipe = pipeline.DiarizersPipeline.from_pretrained(
       asr_model=args.asr_model,
+      diarizer_preset=preset,
       segmentation_model=args.segmentation_model,
       llm_model_or_path=args.llm_model,
+      llm_gguf_filename=args.gguf_file,
+      llm_backend=args.llm_backend,
       device=args.device,
   )
   transcript = pipe(args.audio, num_speakers=args.num_speakers)
   print(transcript.to_text(use_llm_speaker=True))
   if args.output_json:
+    os.makedirs(
+        os.path.dirname(os.path.abspath(args.output_json)), exist_ok=True
+    )
     with open(args.output_json, "w", encoding="utf-8") as f:
       f.write(transcript.to_json())
+  if args.output_rttm:
+    os.makedirs(
+        os.path.dirname(os.path.abspath(args.output_rttm)), exist_ok=True
+    )
+    with open(args.output_rttm, "w", encoding="utf-8") as f:
+      f.write(transcript.to_rttm() + "\n")
+  if args.output_srt:
+    os.makedirs(
+        os.path.dirname(os.path.abspath(args.output_srt)), exist_ok=True
+    )
+    with open(args.output_srt, "w", encoding="utf-8") as f:
+      f.write(transcript.to_srt() + "\n")
+  if args.output_vtt:
+    os.makedirs(
+        os.path.dirname(os.path.abspath(args.output_vtt)), exist_ok=True
+    )
+    with open(args.output_vtt, "w", encoding="utf-8") as f:
+      f.write(transcript.to_vtt() + "\n")
 
 
 def main(argv: Optional[List[str]] = None) -> None:
@@ -155,6 +195,19 @@ def main(argv: Optional[List[str]] = None) -> None:
         default=8,
     )
     p_prep.add_argument("--seed", type=int, default=42)
+    p_prep.add_argument(
+        "--flavor",
+        default="both",
+        choices=["both", "hyp2ora", "deg2ref"],
+        help="SFT training prompt flavor",
+    )
+    p_prep.add_argument(
+        "--max_chunk_chars",
+        "--max-chunk-chars",
+        dest="max_chunk_chars",
+        type=int,
+        default=4000,
+    )
     p_prep.add_argument(
         "--no_locality_oracle",
         "--no-locality-oracle",
@@ -223,6 +276,33 @@ def main(argv: Optional[List[str]] = None) -> None:
         help="Path to output JSON",
     )
     p_inf.add_argument(
+        "--output_rttm",
+        "--output-rttm",
+        dest="output_rttm",
+        default="",
+        help="Path to output RTTM",
+    )
+    p_inf.add_argument(
+        "--output_srt",
+        "--output-srt",
+        dest="output_srt",
+        default="",
+        help="Path to output SRT subtitles",
+    )
+    p_inf.add_argument(
+        "--output_vtt",
+        "--output-vtt",
+        dest="output_vtt",
+        default="",
+        help="Path to output VTT subtitles",
+    )
+    p_inf.add_argument(
+        "--preset",
+        default="telephony",
+        choices=["telephony", "fisher", "callhome", "ami", "meeting"],
+        help="Acoustic diarization preset",
+    )
+    p_inf.add_argument(
         "--asr_model",
         "--asr-model",
         dest="asr_model",
@@ -236,6 +316,21 @@ def main(argv: Optional[List[str]] = None) -> None:
     )
     p_inf.add_argument(
         "--llm_model", "--llm-model", dest="llm_model", default=None
+    )
+    p_inf.add_argument(
+        "--gguf_file",
+        "--gguf-file",
+        dest="gguf_file",
+        default=None,
+        help="GGUF filename in Hugging Face repo",
+    )
+    p_inf.add_argument(
+        "--llm_backend",
+        "--llm-backend",
+        dest="llm_backend",
+        default="auto",
+        choices=["auto", "gguf", "transformers"],
+        help="LLM inference backend",
     )
     p_inf.add_argument(
         "--num_speakers",

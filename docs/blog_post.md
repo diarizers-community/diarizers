@@ -42,7 +42,7 @@ Transcript-Preserving Speaker Transfer (`TPST`) requires aligning the LLM's comp
 ### Bug 6: Inter-Chunk Permutation Flips & Monologue Drift (`LG-TPST`)
 When long conversations are split into 4,000-character LLM prompts, independent chunks can permute speaker IDs (`<speaker:1>` <-> `<speaker:2>`), and autoregressive LLMs can occasionally hallucinate a ghost `<speaker:3>` or flip speaker labels across a long monologue. `diarizers` solves both via:
 - **`ChunkedPromptBuilder`**: Uses overlapping word windows (`overlap_words=60`) and **Hungarian (`scipy.optimize.linear_sum_assignment`) inter-chunk reconciliation**.
-- **`locality_gated_speaker_transfer` (`LG-TPST`)**: Absorbs tiny ghost speaker clusters (`<= 12` words) into adjacent dominant speakers and gates long-span (`> 5` words) monologue flips back to the acoustic clustering baseline while preserving local turn-boundary corrections (`1 <= L <= 5` words).
+- **`locality_gated_speaker_transfer` (`LG-TPST`)**: Absorbs tiny ghost speaker clusters (`<= 15` words in `>= 3`-speaker meetings) into dominant speakers and gates long-span monologue flips (`> 5` words in `>= 3`-speaker meetings and `> 15` words in `2`-speaker conversations) back to the acoustic clustering baseline while preserving local turn-boundary corrections.
 
 ---
 
@@ -77,12 +77,14 @@ In accordance with data licensing and privacy policies, no benchmark datasets or
 
 ### Table 1: Full-Set Open-Frontend (`diarizers` v1.0.0) + `DiarizationLM-Gemma-4-E4B-v1` Evaluation (All 211 Test Utterances)
 
+*(Post-LLM evaluations in Table 1 were run in full-precision `bfloat16` on TPU with `max_new_tokens = 1.2x` input tokens and `6,000`-character chunk windows; Fisher uses fixed speaker count `K=2`, CALLHOME uses auto speaker count `[2..6]`, ICSI uses auto speaker count `[2..10]`, and AMI uses auto speaker count `[3..5]`.)*
+
 | Benchmark Split (Full Test) | Utterances | 2024 Prototype WDER (%) | `diarizers` v1.0.0 WER (%) | `diarizers` v1.0.0 Open-Frontend WDER (%) | `DiarizationLM-Gemma-4-E4B-v1` + `LG-TPST` WDER (%) | `DiarizationLM-Gemma-4-E4B-v1` Raw-TPST WDER (%) | `diarizers` v1.0.0 Open-Frontend cpWER (%) | `DiarizationLM-Gemma-4-E4B-v1` cpWER (%) | SpkCntMAE |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Fisher Test** | 172 | 43.99 | **20.80** | **4.35** *(raw 4.45)* | **2.59** | **2.65** | 24.78 *(Oracle 20.46)* | **21.91** *(Raw: 21.99)* | **0.000** |
-| **CALLHOME Test** | 20 | — | **21.25** | **9.42** *(raw 9.47)* | **5.98** | **4.89** | 32.42 *(Oracle 21.08)* | **27.69** *(Raw: **25.91**)* | **0.050** |
-| **ICSI Test** | 3 | — | **35.29** | **23.48** *(raw 23.58)* | **23.10** | **23.11** | 48.97 *(Oracle 34.97)* | **48.62** *(Raw: 48.63)* | **3.333** |
-| **AMI Test (`Mix-Headset`)** | 16 | 56.79 | **29.14** | **20.68** *(raw 20.80)* | **20.14** | **20.13** | 46.07 *(Oracle 28.70)* | **45.56** *(Raw: **45.53**)* | **0.688** |
+| **Fisher Test (`K=2`)** | 172 | 43.99 | **20.80** | **4.35** *(raw 4.45)* | **2.59** | **2.65** | 24.78 *(Oracle 20.46)* | **21.91** *(Raw: 21.99)* | **0.000** *(fixed K=2)* |
+| **CALLHOME Test (`[2..6]`)** | 20 | — | **21.25** | **9.42** *(raw 9.47)* | **5.98** | **4.89** | 32.42 *(Oracle 21.08)* | **27.69** *(Raw: **25.91**)* | **0.050** |
+| **ICSI Test (`[2..10]`)** | 3 | — | **35.29** | **23.48** *(raw 23.58)* | **23.10** | **23.11** | 48.97 *(Oracle 34.97)* | **48.62** *(Raw: 48.63)* | **3.333** |
+| **AMI Test (`Mix-Headset`, `[3..5]`)** | 16 | 56.79 | **29.14** | **20.68** *(raw 20.80)* | **20.14** | **20.13** | 46.07 *(Oracle 28.70)* | **45.56** *(Raw: **45.53**)* | **0.688** |
 
 ### Table 2: Full-Set Reference USM + Turn-to-Diarize Evaluation (`DiarizationLM-Gemma-4-E4B-v1`, All 211 Test Utterances)
 
