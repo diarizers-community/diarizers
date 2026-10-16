@@ -13,16 +13,14 @@ short_description: End-to-End Apache-2.0 ASR + Speaker Diarization + Diarization
 
 # Diarizers v1.0 — Interactive ASR, Speaker Diarization & DiarizationLM Demo
 
-## Disclaimer & Open-Source Reproduction Notice
+## Overview
 
-> **This is not an officially supported Google product.**
->
-> This interactive demo and the `diarizers` (`v1.0.0`) library are an independent, clean-room Apache-2.0 open-source reproduction and unified inference pipeline for:
+> This interactive demo and the `diarizers` (`v1.0.0`) library provide an Apache-2.0 open-source unified inference pipeline for:
 > - **DiarizationLM**: *DiarizationLM: Speaker Diarization Post-Processing with Large Language Models* ([arXiv:2401.03506](https://arxiv.org/abs/2401.03506))
 > - **SpectralCluster**: *Speaker Diarization with LSTM* ([arXiv:1710.10468](https://arxiv.org/abs/1710.10468))
 > - **Turn-to-Diarize**: *Turn-to-Diarize: Online Speaker Diarization Constrained by Transformer Transducer Speaker Turn Detection* ([arXiv:2109.11641](https://arxiv.org/abs/2109.11641))
 >
-> The original papers were conducted using Google's internal proprietary infrastructure and internal datasets. This open-source package pairs MIT/Apache-2.0 acoustic frontends (`openai/whisper-large-v3-turbo` + `pyannote/segmentation-3.0` + `speechbrain/spkrec-ecapa-voxceleb` + `SpectralClusterer`) with [`diarizers-community/DiarizationLM-Gemma-4-E4B-v1`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v1) and **Locality-Gated Transcript-Preserving Speaker Transfer (LG-TPST)** entirely on CPU or GPU.
+> This open-source package pairs MIT/Apache-2.0 acoustic frontends (`openai/whisper-large-v3-turbo` + `pyannote/segmentation-3.0` + `speechbrain/spkrec-ecapa-voxceleb` + `SpectralClusterer`) with [`diarizers-community/DiarizationLM-Gemma-4-E4B-v1`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v1) and **Locality-Gated Transcript-Preserving Speaker Transfer (LG-TPST)** entirely on CPU or GPU.
 
 ## Links & Resources
 

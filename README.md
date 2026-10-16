@@ -12,7 +12,6 @@
 ## Table of Contents
 
 * [Overview](#overview)
-* [Disclaimer](#disclaimer)
 * [Architecture](#architecture)
 * [Why 2024 `DiarizersLM` Had 43.99%–56.79% WDER & How `diarizers` (`v1.0.0`) Solves It](#why-2024-diarizerslm-had-43995679-wder--how-diarizers-v100-solves-it)
 * [Evaluation Results](#evaluation-results)
@@ -50,13 +49,7 @@ It combines:
 
 > **Archival Note**: All functionality from the experimental [`diarizers-community/DiarizersLM`](https://github.com/diarizers-community/DiarizersLM) repository has been folded into and superseded by `diarizers` (`v1.0.0+`).
 
----
-
-## Disclaimer
-
-**This is not an officially supported Google product.**
-
-`diarizers` (`v1.0.0`) is an independent, clean-room Apache-2.0 open-source software package implementing and extending the algorithms described in:
+`diarizers` (`v1.0.0`) implements and extends the algorithms described in:
 - **DiarizationLM**: Quan Wang, Yiling Huang, Guanlong Zhao, Evan Clark, Wei Xia, Hank Liao, *"DiarizationLM: Speaker Diarization Post-Processing with Large Language Models"*, **Interspeech 2024** ([arXiv:2401.03506](https://arxiv.org/abs/2401.03506)).
 - **Turn-to-Diarize**: Wei Xia, Han Lu, Quan Wang, Anshuman Tripathi, Yiling Huang, Ignacio Lopez Moreno, Hasim Sak, *"Turn-to-Diarize: Online Speaker Diarization Constrained by Transformer Transducer Speaker Turn Detection"*, **ICASSP 2022** ([arXiv:2109.11641](https://arxiv.org/abs/2109.11641)).
 - **SpectralCluster**: Quan Wang, Carlton Downey, Li Wan, Philip Andrew Mansfield, Ignacio Lopez Moreno, *"Speaker Diarization with LSTM"*, **ICASSP 2018** ([arXiv:1710.10468](https://arxiv.org/abs/1710.10468)).
@@ -150,7 +143,7 @@ Open-source pipeline configuration:
 
 ### Table 2: USM + Turn-to-Diarize Frontend + `DiarizationLM-Gemma-4-E4B-v1`
 
-For reference, below is the performance of [`diarizers-community/DiarizationLM-Gemma-4-E4B-v1`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v1) on the exact same 211 test recordings when paired with Google's USM ASR and Turn-to-Diarize frontend (with 95% bootstrap confidence intervals over `B = 10,000` conversation resamples):
+For reference, below is the performance of [`diarizers-community/DiarizationLM-Gemma-4-E4B-v1`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v1) on the exact same 211 test recordings when paired with the USM ASR and Turn-to-Diarize frontend (with 95% bootstrap confidence intervals over `B = 10,000` conversation resamples):
 
 | Benchmark | Test Split | WER (%) | System | WDER (%) [95% CI] | cpWER (%) [95% CI] | SpkCntMAE [95% CI] | Paired ΔWDER vs. Baseline (p-value) |
 | :--- | :--- | :---: | :--- | :---: | :---: | :---: | :---: |

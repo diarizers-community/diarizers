@@ -654,7 +654,6 @@ def compute_log_mel_fbank(
   return fbank_np - np.mean(fbank_np, axis=0, keepdims=True)
 
 
-
 def load_audio_16k(
     audio_input: Union[str, np.ndarray, Tuple[np.ndarray, int]],
     target_sr: int = 16000,

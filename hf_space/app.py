@@ -115,8 +115,7 @@ def build_demo() -> gr.Blocks:
     gr.Markdown(
         "# 🎙️ Diarizers v1.0 — Unified Open-Source ASR, Diarization & "
         "DiarizationLM\n"
-        "> **Disclaimer**: *This is not an officially supported Google "
-        "product.* Independent Apache-2.0/MIT open-source pipeline combining "
+        "> Apache-2.0/MIT open-source pipeline combining "
         "`openai/whisper-large-v3-turbo`, `pyannote/segmentation-3.0`, "
         "`speechbrain/spkrec-ecapa-voxceleb`, `SpectralClusterer`, and "
         "`DiarizationLM-Gemma-4-E4B-v1` (`LG-TPST`)."

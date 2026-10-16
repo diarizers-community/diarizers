@@ -177,4 +177,3 @@ class DiarizersPipeline:
 
 DiarizationPipeline = DiarizersPipeline
 Pipeline = DiarizersPipeline
-

@@ -182,4 +182,3 @@ class SpectralClusterer:
     )
     spectral_embs = spectral_embs / norms
     return _cosine_kmeans(spectral_embs, n_clusters=k_opt)
-

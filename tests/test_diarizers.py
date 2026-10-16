@@ -371,7 +371,6 @@ class TestSpectralAndDiarization(unittest.TestCase):
     )
 
 
-
 class TestASRrefinerPipelineAndEval(unittest.TestCase):
   """Tests ASR adapters, DiarizationLMRefiner, DiarizersPipeline, and Eval."""
 
@@ -802,4 +801,3 @@ class TestASRrefinerPipelineAndEval(unittest.TestCase):
 
 if __name__ == "__main__":
   unittest.main()
-

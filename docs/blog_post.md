@@ -1,14 +1,12 @@
 # Diarizers 1.0: An Open-Source Apache-2.0 Stack for Speaker-Attributed Transcription with DiarizationLM-Gemma-4
 
-> **This is not an officially supported Google product.**
->
-> `diarizers` (`v1.0.0`) is an independent, clean-room Apache-2.0 open-source software package and end-to-end reproduction of the algorithms described in *DiarizationLM* ([Wang et al., Interspeech 2024](https://arxiv.org/abs/2401.03506)), *Turn-to-Diarize* ([Xia et al., ICASSP 2022](https://arxiv.org/abs/2109.11641)), and *SpectralCluster* ([Wang et al., ICASSP 2018](https://arxiv.org/abs/1710.10468)).
+> `diarizers` (`v1.0.0`) is an Apache-2.0 open-source software package and end-to-end pipeline implementing the algorithms described in *DiarizationLM* ([Wang et al., Interspeech 2024](https://arxiv.org/abs/2401.03506)), *Turn-to-Diarize* ([Xia et al., ICASSP 2022](https://arxiv.org/abs/2109.11641)), and *SpectralCluster* ([Wang et al., ICASSP 2018](https://arxiv.org/abs/1710.10468)).
 
 ---
 
 ## Executive Summary
 
-When [`DiarizationLM`](https://arxiv.org/abs/2401.03506) was introduced at Interspeech 2024, it demonstrated that fine-tuned Large Language Models (LLMs) could reduce Word Diarization Error Rate (WDER) by up to 55% on conversational speech by leveraging semantic and syntactic context (`"how are you"` followed by `"i am doing great"`). However, the original paper relied on Google's internal proprietary ASR (`USM`) and speaker diarization (`Turn-to-Diarize`) frontends.
+When [`DiarizationLM`](https://arxiv.org/abs/2401.03506) was introduced at Interspeech 2024, it demonstrated that fine-tuned Large Language Models (LLMs) could reduce Word Diarization Error Rate (WDER) by up to 55% on conversational speech by leveraging semantic and syntactic context (`"how are you"` followed by `"i am doing great"`). However, the original paper evaluated on proprietary ASR (`USM`) and speaker diarization (`Turn-to-Diarize`) frontends.
 
 When the community first attempted to pair open-source ASR and diarization models with DiarizationLM in the 2024 experimental [`DiarizersLM`](https://github.com/diarizers-community/DiarizersLM) repository, end-to-end WDER degraded to **43.99% on Fisher** and **56.79% on AMI** — nearly equivalent to random coin-flipping on two-speaker telephone calls.
 

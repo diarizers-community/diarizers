@@ -1,7 +1,6 @@
 """Word-speaker alignment, TPST, LG-TPST, and chunk reconciliation."""
 
 from collections.abc import Generator, Sequence
-import difflib
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -746,4 +745,3 @@ def reconcile_chunk_speakers_hungarian(
 
 
 ChunkedPromptBuilder = UtteranceChunker
-

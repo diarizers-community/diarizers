@@ -141,4 +141,3 @@ __all__ = [
     "transcript_preserving_speaker_transfer",
     "turns_to_word_segments",
 ]
-

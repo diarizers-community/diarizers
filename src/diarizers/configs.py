@@ -124,4 +124,3 @@ MEETING_MULTISPK_PRESET = DiarizationPreset(
 )
 
 DEFAULT_DIARIZERS_CONFIG = DiarizersConfig()
-

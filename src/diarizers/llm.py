@@ -216,4 +216,3 @@ class DiarizationLMRefiner:
       u_copy["hyp_spk_llm"] = lg_tpst
       out_utts.append(u_copy)
     return {"utterances": out_utts}
-
