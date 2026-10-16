@@ -1,0 +1,8 @@
+[run]
+omit =
+    setup.py
+    tests/*
+    scripts/*
+    hf_space/*
+    src/diarizers/train.py
+    src/diarizers/export.py
