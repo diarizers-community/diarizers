@@ -36,7 +36,8 @@ def refine_affinity_matrix(
     mat = gaussian_filter(mat, sigma=gaussian_blur_sigma)
 
   if p_percentile > 0:
-    thresh = np.percentile(mat, p_percentile * 100.0, axis=1, keepdims=True)
+    eff_p = min(p_percentile, 0.70) if n < 100 else p_percentile
+    thresh = np.percentile(mat, eff_p * 100.0, axis=1, keepdims=True)
     mat = np.where(mat >= thresh, mat, mat * multiplier)
 
   mat = 0.5 * (mat + mat.T)

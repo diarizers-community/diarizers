@@ -7,7 +7,8 @@
 [![Downloads](https://static.pepy.tech/badge/diarizers)](https://www.pepy.tech/projects/diarizers)
 [![arxiv](https://img.shields.io/badge/arXiv-2401.03506-blue.svg)](https://arxiv.org/abs/2401.03506)
 [![HuggingFace](https://img.shields.io/badge/Hugging_Face-DiarizationLM--Gemma--4--E4B--v1-blue.svg)](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v1)
-[![HuggingFace Space](https://img.shields.io/badge/Online-Demo-blue.svg)](https://huggingface.co/spaces/diarizers-community/DiarizationLM-GGUF)
+[![Audio Demo Space](https://img.shields.io/badge/Audio_Demo-spaces%2Fdiarizers-blue.svg)](https://huggingface.co/spaces/diarizers-community/diarizers)
+[![Text Demo Space](https://img.shields.io/badge/Text_Demo-DiarizationLM--GGUF-blue.svg)](https://huggingface.co/spaces/diarizers-community/DiarizationLM-GGUF)
 
 ## Table of Contents
 
@@ -367,15 +368,16 @@ print(f"SpkCntMAE: {metrics['SpkCntMAE']:.3f}")
 
 ### 7. Interactive CPU Gradio Demo (`hf_space/app.py`)
 
-To launch the local 2-tab interactive Gradio demo on CPU:
+Two hosted interactive Spaces are available on Hugging Face:
+- **End-to-End Audio Pipeline Demo**: [`https://huggingface.co/spaces/diarizers-community/diarizers`](https://huggingface.co/spaces/diarizers-community/diarizers) — Upload or select multi-speaker conversation audio and inspect the acoustic diarization baseline, `DiarizationLM-Gemma-4-E4B-v1` (`LG-TPST`) refined transcript, NIST RTTM, and SRT subtitles.
+- **Text-Only DiarizationLM GGUF Demo**: [`https://huggingface.co/spaces/diarizers-community/DiarizationLM-GGUF`](https://huggingface.co/spaces/diarizers-community/DiarizationLM-GGUF) — Paste any diarized transcript (`<speaker:1> ... <speaker:2> ...`) and stream `DiarizationLM-Gemma-4-E4B-v1` (`Q4_K_M` GGUF) speaker boundary refinement on CPU.
+
+To launch the end-to-end audio Gradio demo locally on CPU:
 
 ```bash
 pip install gradio
 python hf_space/app.py
 ```
-
-- **Tab 1 — End-to-End Audio Pipeline (CPU)**: Upload or record an audio file, select an acoustic preset (`Fisher Telephony`, `Callhome Telephony`, or `Meeting Multi-Speaker`), and generate speaker-attributed transcripts, NIST RTTM, and SRT subtitles.
-- **Tab 2 — DiarizationLM + LG-TPST Text Refinement**: Paste any diarized transcript (`<speaker:1> ... <speaker:2> ...`) and refine speaker turn boundaries using `diarizers-community/DiarizationLM-Gemma-4-E4B-v1`.
 
 ---
 
