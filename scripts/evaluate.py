@@ -54,6 +54,9 @@ def main() -> None:
         res_base["utterances"],
         num_resamples=args.bootstrap_resamples,
     )
+    report["paired_bootstrap_ci"]["comparison"] = (
+        f"{args.hyp_spk_field} - hyp_spk"
+    )
 
   print(json.dumps(report, indent=2))
   if args.output_json:

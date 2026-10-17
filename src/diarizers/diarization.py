@@ -617,7 +617,7 @@ def compute_log_mel_fbank(
   """Computes CMVN-normalized 80-dim dB log-mel filterbank features (T, 80)."""
   wav_f32 = np.asarray(waveform, dtype=np.float32)
   if wav_f32.ndim > 1:
-    wav_f32 = wav_f32[:, 0]
+    wav_f32 = np.mean(wav_f32, axis=1, dtype=np.float32)
   if torch is not None:
     wav_t = torch.from_numpy(wav_f32)
     win_length = int(0.025 * sample_rate)
@@ -675,14 +675,18 @@ def load_audio_16k(
         n_ch = wf.getnchannels()
         raw = wf.readframes(wf.getnframes())
       pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-      wav = pcm.reshape(-1, n_ch)[:, 0] if n_ch > 1 else pcm
+      wav = (
+          np.mean(pcm.reshape(-1, n_ch), axis=1, dtype=np.float32)
+          if n_ch > 1
+          else pcm
+      )
   elif isinstance(audio_input, tuple):
     wav, sr = np.asarray(audio_input[0], dtype=np.float32), int(audio_input[1])
   else:
     wav, sr = np.asarray(audio_input, dtype=np.float32), target_sr
 
   if wav.ndim > 1:
-    wav = wav[:, 0]
+    wav = np.mean(wav, axis=1, dtype=np.float32)
   if sr != target_sr and wav.size > 0:
     from scipy import signal
 
@@ -752,9 +756,10 @@ class ECAPASpectralDiarizer:
         "energy_vad",
     ):
       return None
-    # Skip loading real segmentation weights when a mock encoder is passed.
-    if self.encoder is not None and not isinstance(
-        self.encoder, SpeechBrainECAPATDNN
+    # Skip loading real segmentation weights when a mock callable is passed.
+    if self.encoder is not None and (
+        getattr(self.encoder, "is_mock", False)
+        or (nn is not None and not isinstance(self.encoder, nn.Module))
     ):
       return None
     if torch is None:

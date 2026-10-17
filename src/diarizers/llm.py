@@ -140,7 +140,9 @@ class DiarizationLMRefiner:
           temperature=0.0,
           stop=[self.prompt_config.completion_suffix.strip(), "<turn|>"],
       )
-      return str(out["choices"][0]["text"]).strip()
+      return alignment.truncate_completion_suffix(
+          str(out["choices"][0]["text"]), self.prompt_config.completion_suffix
+      )
 
     if self._hf_model is not None and self._hf_tokenizer is not None:
       import torch
@@ -149,17 +151,31 @@ class DiarizationLMRefiner:
           self.device
       )
       in_len = int(inputs.input_ids.shape[1])
+      stop_strs = [self.prompt_config.completion_suffix.strip(), "<turn|>"]
+      stop_strs = [s for s in stop_strs if s]
       with torch.no_grad():
-        out_ids = self._hf_model.generate(
-            **inputs,
-            max_new_tokens=max(256, int(in_len * 1.3)),
-            do_sample=False,
-            pad_token_id=self._hf_tokenizer.eos_token_id,
-        )
+        try:
+          out_ids = self._hf_model.generate(
+              **inputs,
+              max_new_tokens=max(256, int(in_len * 1.3)),
+              do_sample=False,
+              pad_token_id=self._hf_tokenizer.eos_token_id,
+              stop_strings=stop_strs,
+              tokenizer=self._hf_tokenizer,
+          )
+        except TypeError:
+          out_ids = self._hf_model.generate(
+              **inputs,
+              max_new_tokens=max(256, int(in_len * 1.3)),
+              do_sample=False,
+              pad_token_id=self._hf_tokenizer.eos_token_id,
+          )
       comp = self._hf_tokenizer.decode(
           out_ids[0][in_len:], skip_special_tokens=True
       )
-      return str(comp).strip()
+      return alignment.truncate_completion_suffix(
+          str(comp), self.prompt_config.completion_suffix
+      )
 
     # Identity pass-through when no LLM is configured
     if not self._warned_passthrough:

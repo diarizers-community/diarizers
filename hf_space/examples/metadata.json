@@ -1,0 +1,802 @@
+{
+  "examples": [
+    {
+      "id": "example_1_telephony",
+      "title": "Example 1: 2-Speaker Project Call (Boundary Correction)",
+      "description": "Two-speaker dialogue where acoustic diarization places the turn boundary before 'meeting'; DiarizationLM-Gemma-4-E4B-v1 restores 'meeting' to Speaker 1.",
+      "audio_url": "examples/example_conversation.wav",
+      "preset_name": "Fisher Telephony (2 speakers)",
+      "num_speakers": 2,
+      "asr_model": "openai/whisper-base.en",
+      "timings": {
+        "asr_sec": 5.63,
+        "diar_sec": 0.91,
+        "llm_sec": 6.49,
+        "total_sec": 13.02
+      },
+      "word_count": 40,
+      "detected_speakers": 2,
+      "relabeled_words": 1,
+      "words": [
+        {
+          "word": "hello",
+          "start": 0.0,
+          "end": 0.538,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "laura",
+          "start": 0.538,
+          "end": 1.076,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "how",
+          "start": 1.076,
+          "end": 1.399,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "are",
+          "start": 1.399,
+          "end": 1.721,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "you",
+          "start": 1.721,
+          "end": 2.044,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "doing",
+          "start": 2.044,
+          "end": 2.582,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "today",
+          "start": 2.582,
+          "end": 3.12,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "are",
+          "start": 3.12,
+          "end": 3.329,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "you",
+          "start": 3.329,
+          "end": 3.538,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "ready",
+          "start": 3.538,
+          "end": 3.886,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "for",
+          "start": 3.886,
+          "end": 4.095,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "our",
+          "start": 4.095,
+          "end": 4.305,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "project",
+          "start": 4.305,
+          "end": 4.792,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "meeting",
+          "start": 4.792,
+          "end": 5.28,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "hi",
+          "start": 5.28,
+          "end": 5.468,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "tom",
+          "start": 5.468,
+          "end": 5.751,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "im",
+          "start": 5.751,
+          "end": 5.939,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "doing",
+          "start": 5.939,
+          "end": 6.409,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "great",
+          "start": 6.409,
+          "end": 6.88,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "yes",
+          "start": 6.88,
+          "end": 7.185,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "i",
+          "start": 7.185,
+          "end": 7.286,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "just",
+          "start": 7.286,
+          "end": 7.692,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "finished",
+          "start": 7.692,
+          "end": 8.505,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "testing",
+          "start": 8.505,
+          "end": 9.215,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "the",
+          "start": 9.215,
+          "end": 9.52,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "speaker",
+          "start": 9.52,
+          "end": 10.231,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "diarization",
+          "start": 10.231,
+          "end": 11.348,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "pipeline",
+          "start": 11.348,
+          "end": 12.16,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "wonderful",
+          "start": 12.16,
+          "end": 12.974,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "thank",
+          "start": 12.974,
+          "end": 13.426,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "you",
+          "start": 13.426,
+          "end": 13.697,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "so",
+          "start": 13.697,
+          "end": 13.878,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "much",
+          "start": 13.878,
+          "end": 14.24,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "let",
+          "start": 14.24,
+          "end": 14.436,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "us",
+          "start": 14.436,
+          "end": 14.566,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "review",
+          "start": 14.566,
+          "end": 14.958,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "the",
+          "start": 14.958,
+          "end": 15.154,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "benchmark",
+          "start": 15.154,
+          "end": 15.741,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "results",
+          "start": 15.741,
+          "end": 16.198,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "together",
+          "start": 16.198,
+          "end": 16.72,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        }
+      ],
+      "before_llm_text": "<speaker:1> hello laura how are you doing today are you ready for our project <speaker:2> meeting hi tom im doing great yes i just finished testing the speaker diarization pipeline <speaker:1> wonderful thank you so much let us review the benchmark results together",
+      "after_llm_text": "<speaker:1> hello laura how are you doing today are you ready for our project meeting <speaker:2> hi tom im doing great yes i just finished testing the speaker diarization pipeline <speaker:1> wonderful thank you so much let us review the benchmark results together",
+      "after_raw_text": "<speaker:1> hello laura how are you doing today are you ready for our project meeting <speaker:2> hi tom im doing great yes i just finished testing the speaker diarization pipeline <speaker:1> wonderful thank you so much let us review the benchmark results together",
+      "rttm_before": "SPEAKER example_1_telephony 1 0.000 4.792 <NA> <NA> speaker_1 <NA> <NA>\nSPEAKER example_1_telephony 1 4.792 7.368 <NA> <NA> speaker_2 <NA> <NA>\nSPEAKER example_1_telephony 1 12.160 4.560 <NA> <NA> speaker_1 <NA> <NA>",
+      "srt_before": "1\n00:00:00,000 --> 00:00:04,792\n[Speaker 1] hello laura how are you doing today are you ready for our project\n\n2\n00:00:04,792 --> 00:00:12,160\n[Speaker 2] meeting hi tom im doing great yes i just finished testing the speaker diarization pipeline\n\n3\n00:00:12,160 --> 00:00:16,720\n[Speaker 1] wonderful thank you so much let us review the benchmark results together",
+      "rttm_after": "SPEAKER example_1_telephony 1 0.000 5.280 <NA> <NA> speaker_1 <NA> <NA>\nSPEAKER example_1_telephony 1 5.280 6.880 <NA> <NA> speaker_2 <NA> <NA>\nSPEAKER example_1_telephony 1 12.160 4.560 <NA> <NA> speaker_1 <NA> <NA>",
+      "srt_after": "1\n00:00:00,000 --> 00:00:05,280\n[Speaker 1] hello laura how are you doing today are you ready for our project meeting\n\n2\n00:00:05,280 --> 00:00:12,160\n[Speaker 2] hi tom im doing great yes i just finished testing the speaker diarization pipeline\n\n3\n00:00:12,160 --> 00:00:16,720\n[Speaker 1] wonderful thank you so much let us review the benchmark results together"
+    },
+    {
+      "id": "example_2_meeting_3spk",
+      "title": "Example 2: 3-Speaker Engineering Sync Meeting",
+      "description": "Three-speaker engineering sync meeting diarized with AMI Meeting Preset + SpectralClusterer + DiarizationLM-Gemma-4-E4B-v1 (LG-TPST restores 'model' to Speaker 1 and 'four benchmarks' to Speaker 2).",
+      "audio_url": "examples/example_2_meeting_3spk.wav",
+      "preset_name": "AMI Meeting (3-5 speakers)",
+      "num_speakers": 3,
+      "asr_model": "openai/whisper-base.en",
+      "timings": {
+        "asr_sec": 2.96,
+        "diar_sec": 0.59,
+        "llm_sec": 7.33,
+        "total_sec": 10.88
+      },
+      "word_count": 53,
+      "detected_speakers": 3,
+      "relabeled_words": 3,
+      "words": [
+        {
+          "word": "welcome",
+          "start": 0.0,
+          "end": 0.512,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "everyone",
+          "start": 0.512,
+          "end": 1.098,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "to",
+          "start": 1.098,
+          "end": 1.244,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "our",
+          "start": 1.244,
+          "end": 1.463,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "weekly",
+          "start": 1.463,
+          "end": 1.902,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "engineering",
+          "start": 1.902,
+          "end": 2.707,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "sync",
+          "start": 2.707,
+          "end": 3.0,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "sarah",
+          "start": 3.0,
+          "end": 3.356,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "could",
+          "start": 3.356,
+          "end": 3.711,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "you",
+          "start": 3.711,
+          "end": 3.924,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "share",
+          "start": 3.924,
+          "end": 4.28,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "the",
+          "start": 4.28,
+          "end": 4.493,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "update",
+          "start": 4.493,
+          "end": 4.92,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "on",
+          "start": 4.92,
+          "end": 5.062,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "the",
+          "start": 5.062,
+          "end": 5.276,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "speech",
+          "start": 5.276,
+          "end": 5.702,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "recognition",
+          "start": 5.702,
+          "end": 6.484,
+          "acoustic_speaker": "1",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "model",
+          "start": 6.484,
+          "end": 6.84,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "1",
+          "llm_speaker": "1"
+        },
+        {
+          "word": "sure",
+          "start": 6.84,
+          "end": 7.2,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "we",
+          "start": 7.2,
+          "end": 7.381,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "upgraded",
+          "start": 7.381,
+          "end": 8.102,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "the",
+          "start": 8.102,
+          "end": 8.372,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "front",
+          "start": 8.372,
+          "end": 8.823,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "end",
+          "start": 8.823,
+          "end": 9.093,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "to",
+          "start": 9.093,
+          "end": 9.273,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "whisper",
+          "start": 9.273,
+          "end": 9.904,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "and",
+          "start": 9.904,
+          "end": 10.174,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "reduced",
+          "start": 10.174,
+          "end": 10.805,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "the",
+          "start": 10.805,
+          "end": 11.076,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "word",
+          "start": 11.076,
+          "end": 11.436,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "error",
+          "start": 11.436,
+          "end": 11.887,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "rate",
+          "start": 11.887,
+          "end": 12.247,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "across",
+          "start": 12.247,
+          "end": 12.788,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "all",
+          "start": 12.788,
+          "end": 13.058,
+          "acoustic_speaker": "2",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "four",
+          "start": 13.058,
+          "end": 13.419,
+          "acoustic_speaker": "3",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "benchmarks",
+          "start": 13.419,
+          "end": 14.32,
+          "acoustic_speaker": "3",
+          "raw_llm_speaker": "2",
+          "llm_speaker": "2"
+        },
+        {
+          "word": "that",
+          "start": 14.32,
+          "end": 14.593,
+          "acoustic_speaker": "3",
+          "raw_llm_speaker": "3",
+          "llm_speaker": "3"
+        },
+        {
+          "word": "is",
+          "start": 14.593,
+          "end": 14.73,
+          "acoustic_speaker": "3",
+          "raw_llm_speaker": "3",
+          "llm_speaker": "3"
+        },
+        {
+          "word": "great",
+          "start": 14.73,
+          "end": 15.072,
+          "acoustic_speaker": "3",
+          "raw_llm_speaker": "3",
+          "llm_speaker": "3"
+        },
+        {
+          "word": "progress",
+          "start": 15.072,
+          "end": 15.618,
+          "acoustic_speaker": "3",
+          "raw_llm_speaker": "3",
+          "llm_speaker": "3"
+        },
+        {
+          "word": "sarah",
+          "start": 15.618,
+          "end": 15.96,
+          "acoustic_speaker": "3",
+          "raw_llm_speaker": "3",
+          "llm_speaker": "3"
+        },
+        {
+          "word": "i",
+          "start": 15.96,
+          "end": 16.035,
+          "acoustic_speaker": "3",
+          "raw_llm_speaker": "3",
+          "llm_speaker": "3"
+        },
+        {
+          "word": "also",
+          "start": 16.035,
+          "end": 16.336,
+          "acoustic_speaker": "3",
+          "raw_llm_speaker": "3",
+          "llm_speaker": "3"
+        },
+        {
+          "word": "verified",
+          "start": 16.336,
+          "end": 16.938,
+          "acoustic_speaker": "3",
+          "raw_llm_speaker": "3",
+          "llm_speaker": "3"
+        },
+        {
+          "word": "that",
+          "start": 16.938,
+          "end": 17.239,
+          "acoustic_speaker": "3",
+          "raw_llm_speaker": "3",
+          "llm_speaker": "3"
+        },
+        {
+          "word": "the",
+          "start": 17.239,
+          "end": 17.465,
+          "acoustic_speaker": "3",
+          "raw_llm_speaker": "3",
+          "llm_speaker": "3"
+        },
+        {
+          "word": "quantized",
+          "start": 17.465,
+          "end": 18.142,
+          "acoustic_speaker": "3",
+          "raw_llm_speaker": "3",
+          "llm_speaker": "3"
+        },
+        {
+          "word": "language",
+          "start": 18.142,
+          "end": 18.744,
+          "acoustic_speaker": "3",
+          "raw_llm_speaker": "3",
+          "llm_speaker": "3"
+        },
+        {
+          "word": "model",
+          "start": 18.744,
+          "end": 19.121,
+          "acoustic_speaker": "3",
+          "raw_llm_speaker": "3",
+          "llm_speaker": "3"
+        },
+        {
+          "word": "runs",
+          "start": 19.121,
+          "end": 19.422,
+          "acoustic_speaker": "3",
+          "raw_llm_speaker": "3",
+          "llm_speaker": "3"
+        },
+        {
+          "word": "smoothly",
+          "start": 19.422,
+          "end": 20.024,
+          "acoustic_speaker": "3",
+          "raw_llm_speaker": "3",
+          "llm_speaker": "3"
+        },
+        {
+          "word": "on",
+          "start": 20.024,
+          "end": 20.174,
+          "acoustic_speaker": "3",
+          "raw_llm_speaker": "3",
+          "llm_speaker": "3"
+        },
+        {
+          "word": "cpu",
+          "start": 20.174,
+          "end": 20.4,
+          "acoustic_speaker": "3",
+          "raw_llm_speaker": "3",
+          "llm_speaker": "3"
+        }
+      ],
+      "before_llm_text": "<speaker:1> welcome everyone to our weekly engineering sync sarah could you share the update on the speech recognition <speaker:2> model sure we upgraded the front end to whisper and reduced the word error rate across all <speaker:3> four benchmarks that is great progress sarah i also verified that the quantized language model runs smoothly on cpu",
+      "after_llm_text": "<speaker:1> welcome everyone to our weekly engineering sync sarah could you share the update on the speech recognition model <speaker:2> sure we upgraded the front end to whisper and reduced the word error rate across all four benchmarks <speaker:3> that is great progress sarah i also verified that the quantized language model runs smoothly on cpu",
+      "after_raw_text": "<speaker:1> welcome everyone to our weekly engineering sync sarah could you share the update on the speech recognition model <speaker:2> sure we upgraded the front end to whisper and reduced the word error rate across all four benchmarks <speaker:3> that is great progress sarah i also verified that the quantized language model runs smoothly on cpu",
+      "rttm_before": "SPEAKER example_2_meeting_3spk 1 0.000 6.484 <NA> <NA> speaker_1 <NA> <NA>\nSPEAKER example_2_meeting_3spk 1 6.484 6.574 <NA> <NA> speaker_2 <NA> <NA>\nSPEAKER example_2_meeting_3spk 1 13.058 7.342 <NA> <NA> speaker_3 <NA> <NA>",
+      "srt_before": "1\n00:00:00,000 --> 00:00:06,484\n[Speaker 1] welcome everyone to our weekly engineering sync sarah could you share the update on the speech recognition\n\n2\n00:00:06,484 --> 00:00:13,058\n[Speaker 2] model sure we upgraded the front end to whisper and reduced the word error rate across all\n\n3\n00:00:13,058 --> 00:00:20,400\n[Speaker 3] four benchmarks that is great progress sarah i also verified that the quantized language model runs smoothly on cpu",
+      "rttm_after": "SPEAKER example_2_meeting_3spk 1 0.000 6.840 <NA> <NA> speaker_1 <NA> <NA>\nSPEAKER example_2_meeting_3spk 1 6.840 7.480 <NA> <NA> speaker_2 <NA> <NA>\nSPEAKER example_2_meeting_3spk 1 14.320 6.080 <NA> <NA> speaker_3 <NA> <NA>",
+      "srt_after": "1\n00:00:00,000 --> 00:00:06,840\n[Speaker 1] welcome everyone to our weekly engineering sync sarah could you share the update on the speech recognition model\n\n2\n00:00:06,840 --> 00:00:14,320\n[Speaker 2] sure we upgraded the front end to whisper and reduced the word error rate across all four benchmarks\n\n3\n00:00:14,320 --> 00:00:20,400\n[Speaker 3] that is great progress sarah i also verified that the quantized language model runs smoothly on cpu"
+    }
+  ]
+}

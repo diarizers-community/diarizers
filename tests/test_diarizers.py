@@ -1,9 +1,10 @@
-"""Comprehensive unit tests for the unified Diarizers v1.0.0 package."""
+"""Comprehensive unit tests for the unified Diarizers v1.0.1 package."""
 
 import json
 import os
 import tempfile
 import unittest
+import warnings
 
 import numpy as np
 
@@ -439,10 +440,12 @@ class TestASRrefinerPipelineAndEval(unittest.TestCase):
     formatted = refiner.format_model_input("hello --> ")
     self.assertIn("<|turn>user\n", formatted)
     # Identity pass-through when no model is loaded
-    self.assertEqual(
-        refiner.generate_chunk_completion("<speaker:1> hi --> "),
-        "<speaker:1> hi [eod]",
-    )
+    with warnings.catch_warnings():
+      warnings.simplefilter("ignore", RuntimeWarning)
+      self.assertEqual(
+          refiner.generate_chunk_completion("<speaker:1> hi --> "),
+          "<speaker:1> hi [eod]",
+      )
 
     def mock_completion(prompt: str) -> str:
       self.assertIn("<speaker:1>", prompt)
@@ -540,13 +543,15 @@ class TestASRrefinerPipelineAndEval(unittest.TestCase):
           eval_path,
       ])
       self.assertTrue(os.path.isfile(eval_path))
-      cli.main([
-          "infer",
-          "--input_json",
-          synth_path,
-          "--output_json",
-          infer_path,
-      ])
+      with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        cli.main([
+            "infer",
+            "--input_json",
+            synth_path,
+            "--output_json",
+            infer_path,
+        ])
       self.assertTrue(os.path.isfile(infer_path))
 
   def test_readme_quickstart_and_cli_aliases(self) -> None:
@@ -651,13 +656,15 @@ class TestASRrefinerPipelineAndEval(unittest.TestCase):
           "--output-json",
           sft_p,
       ])
-      cli.main([
-          "run",
-          "--input-json",
-          synth_p,
-          "--output-json",
-          run_p,
-      ])
+      with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        cli.main([
+            "run",
+            "--input-json",
+            synth_p,
+            "--output-json",
+            run_p,
+        ])
       cli.main([
           "evaluate",
           "--input-json",
@@ -873,6 +880,250 @@ class TestASRrefinerPipelineAndEval(unittest.TestCase):
     self.assertEqual(len(rows_both), len(rows_h2o) + len(rows_d2r))
     self.assertTrue(all(r["flavor"] == "hyp2ora" for r in rows_h2o))
     self.assertTrue(all(r["flavor"] == "deg2ref" for r in rows_d2r))
+
+  def test_round1_review_fixes(self) -> None:
+    import diarizers
+    from diarizers import export
+    from unittest import mock
+
+    # 1. [P0-4] truncate_completion_suffix truncates at first occurrence
+    raw_comp = (
+        "<speaker:1> hello <speaker:2> world [eod] "
+        "<speaker:1> hallucinated repeat [eod]<turn|>"
+    )
+    self.assertEqual(
+        diarizers.truncate_completion_suffix(raw_comp),
+        "<speaker:1> hello <speaker:2> world",
+    )
+    self.assertEqual(
+        diarizers.truncate_completion_suffix(
+            "<speaker:1> hi <turn|> <speaker:2> extra"
+        ),
+        "<speaker:1> hi",
+    )
+
+    # reconcile_chunk_speakers_hungarian ignores post-[eod] hallucinations
+    words = ["hello", "world", "good", "morning"]
+    spks = ["1", "2", "2", "2"]
+    hallucinated_comp = [
+        "<speaker:1> hello world <speaker:2> good morning [eod] "
+        "<speaker:2> hello world <speaker:1> good morning [eod]<turn|>"
+    ]
+    raw_s, gated_s = alignment.reconcile_chunk_speakers_hungarian(
+        words, spks, hallucinated_comp
+    )
+    self.assertEqual(raw_s, "1 1 2 2")
+    self.assertEqual(gated_s, "1 1 2 2")
+
+    # DiarizationLMRefiner HF backend passes stop_strings and truncates
+    class _FakeIds:
+
+      def __init__(self, arr):
+        self._arr = arr
+        self.shape = arr.shape
+
+      def to(self, device):
+        del device
+        return self
+
+      def __getitem__(self, item):
+        return self._arr[item]
+
+    class _FakeTokOut(dict):
+
+      def __init__(self):
+        arr = np.array([[10, 11, 12]], dtype=np.int64)
+        super().__init__(input_ids=_FakeIds(arr))
+        self.input_ids = self["input_ids"]
+
+      def to(self, device):
+        del device
+        return self
+
+    class _FakeTokenizer:
+      eos_token_id = 2
+
+      def __call__(self, text, return_tensors="pt"):
+        del text, return_tensors
+        return _FakeTokOut()
+
+      def decode(self, ids, skip_special_tokens=True):
+        del ids, skip_special_tokens
+        return (
+            "<speaker:1> hello <speaker:2> world [eod] "
+            "<speaker:2> trailing garbage"
+        )
+
+    class _FakeHFModel:
+      device = "cpu"
+
+      def generate(self, **kwargs):
+        self.last_kwargs = kwargs
+        return np.array([[10, 11, 12, 20, 21]], dtype=np.int64)
+
+    ref_hf = llm.DiarizationLMRefiner()
+    ref_hf._hf_tokenizer = _FakeTokenizer()
+    fake_model = _FakeHFModel()
+    ref_hf._hf_model = fake_model
+    gen_out = ref_hf.generate_chunk_completion("<speaker:1> hello --> ")
+    self.assertEqual(gen_out, "<speaker:1> hello <speaker:2> world")
+    self.assertIn("stop_strings", fake_model.last_kwargs)
+
+    # 2. [P0-3] export_merged_safetensors Gemma4ForConditionalGeneration
+    class _SavedModel:
+      saved_dir = None
+
+      def eval(self):
+        return self
+
+      def save_pretrained(self, out_dir, safe_serialization=True):
+        del safe_serialization
+        _SavedModel.saved_dir = out_dir
+        os.makedirs(out_dir, exist_ok=True)
+        with open(
+            os.path.join(out_dir, "model.safetensors"), "wb"
+        ) as f_out:
+          f_out.write(b"SAFETENSORS")
+
+    class _SavedTokenizer:
+
+      def save_pretrained(self, out_dir):
+        with open(
+            os.path.join(out_dir, "tokenizer_config.json"),
+            "w",
+            encoding="utf-8",
+        ) as f_tok:
+          f_tok.write("{}")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      src_dir = os.path.join(tmpdir, "src_gemma4")
+      out_dir = os.path.join(tmpdir, "out_gemma4")
+      os.makedirs(src_dir, exist_ok=True)
+      with open(
+          os.path.join(src_dir, "adapter_config.json"),
+          "w",
+          encoding="utf-8",
+      ) as f_ad:
+        json.dump(
+            {"base_model_name_or_path": "google/gemma-4-E4B"}, f_ad
+        )
+
+      fake_peft_mod = mock.MagicMock()
+      merged_mock = mock.MagicMock()
+      merged_mock.merge_and_unload.return_value = _SavedModel()
+      fake_peft_mod.PeftModel.from_pretrained.return_value = merged_mock
+
+      with (
+          mock.patch("transformers.AutoTokenizer.from_pretrained") as m_tok,
+          mock.patch(
+              "transformers.AutoModelForCausalLM.from_pretrained",
+              side_effect=ValueError("Unrecognized Gemma4Config"),
+          ),
+          mock.patch(
+              "transformers.Gemma4ForConditionalGeneration",
+              create=True,
+          ) as m_g4,
+          mock.patch.dict("sys.modules", {"peft": fake_peft_mod}),
+      ):
+        m_tok.return_value = _SavedTokenizer()
+        m_g4.from_pretrained.return_value = _SavedModel()
+        res_exp = export.export_merged_safetensors(src_dir, out_dir)
+        self.assertTrue(m_g4.from_pretrained.called)
+        self.assertTrue(
+            os.path.isfile(os.path.join(res_exp, "model.safetensors"))
+        )
+
+        # Also test standalone (non-adapter) Gemma-4 export path
+        os.remove(os.path.join(src_dir, "adapter_config.json"))
+        out_dir_full = os.path.join(tmpdir, "out_gemma4_full")
+        m_g4.from_pretrained.reset_mock()
+        res_full = export.export_merged_safetensors(src_dir, out_dir_full)
+        self.assertTrue(m_g4.from_pretrained.called)
+        self.assertTrue(
+            os.path.isfile(os.path.join(res_full, "model.safetensors"))
+        )
+
+    # 3. [P1-2] Multi-channel stereo audio averaging in load_audio_16k & fbank
+    sr = 16000
+    n_samples = 1600
+    left = np.ones((n_samples, 1), dtype=np.float32) * 0.2
+    right = np.ones((n_samples, 1), dtype=np.float32) * 0.6
+    stereo = np.hstack([left, right])
+    mono = diarization.load_audio_16k((stereo, sr), target_sr=sr)
+    self.assertEqual(mono.ndim, 1)
+    self.assertTrue(np.allclose(mono, 0.4, atol=1e-5))
+    fb_stereo = diarization.compute_log_mel_fbank(stereo, sample_rate=sr)
+    fb_mono = diarization.compute_log_mel_fbank(mono, sample_rate=sr)
+    self.assertTrue(np.allclose(fb_stereo, fb_mono, atol=1e-5))
+
+    # 4. [P1-3] _ensure_segmentation_model with mock vs nn.Module encoder
+    def plain_fn_enc(batch: np.ndarray) -> np.ndarray:
+      return np.zeros((batch.shape[0], 16), dtype=np.float32)
+
+    diar_fn = diarization.ECAPASpectralDiarizer(encoder=plain_fn_enc)
+    self.assertIsNone(diar_fn._ensure_segmentation_model())
+
+    if diarization.torch is not None:
+      nn_enc = diarization.SpeechBrainECAPATDNN(in_mels=80, emb_dim=192)
+      diar_nn = diarization.ECAPASpectralDiarizer(encoder=nn_enc)
+      with mock.patch.object(
+          diarization.PyanNetSegmentation,
+          "from_pretrained",
+          return_value="loaded_seg_net",
+      ) as m_seg:
+        loaded = diar_nn._ensure_segmentation_model()
+        self.assertEqual(loaded, "loaded_seg_net")
+        self.assertTrue(m_seg.called)
+
+    # 5. [P1-4] Standardized bootstrap CI direction & CLI train/export
+    synth = dataprep.generate_synthetic_dataset(num_utterances=6, seed=11)
+    corp_m = diarizers.compute_corpus_metrics(
+        synth["utterances"],
+        hyp_spk_field="hyp_spk_oracle",
+        baseline_spk_field="hyp_spk",
+        bootstrap_samples=100,
+    )
+    self.assertEqual(
+        corp_m["bootstrap_ci"]["comparison"],
+        "hyp_spk_oracle - hyp_spk",
+    )
+    self.assertLessEqual(
+        corp_m["bootstrap_ci"]["WDER"]["point_diff"], 0.0
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      sft_p = os.path.join(tmpdir, "sft.json")
+      out_train = os.path.join(tmpdir, "ckpt")
+      with open(sft_p, "w", encoding="utf-8") as f_sft:
+        json.dump(dataprep.build_sft_dataset(synth), f_sft)
+      cli.main([
+          "train",
+          "--train-json",
+          sft_p,
+          "--output-dir",
+          out_train,
+          "--dry-run",
+      ])
+      self.assertTrue(
+          os.path.isfile(
+              os.path.join(out_train, "training_plan_summary.json")
+          )
+      )
+      with mock.patch(
+          "diarizers.export.export_merged_safetensors",
+          return_value=out_train,
+      ) as m_exp:
+        cli.main([
+            "export",
+            "--model-path",
+            out_train,
+            "--output-dir",
+            out_train,
+            "--export-gguf",
+            "--llama-cpp-dir",
+            os.path.join(tmpdir, "no_llama"),
+        ])
+        self.assertTrue(m_exp.called)
 
 
 if __name__ == "__main__":

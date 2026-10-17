@@ -286,6 +286,7 @@ def bootstrap_paired_ci(
   pt_cpwer_b = float(100.0 * tot_b[2] / max(tot_b[3], 1.0))
 
   return {
+      "comparison": "A - B",
       "WDER": _summarize(diff_wder, pt_wder_a, pt_wder_b),
       "cpWER": _summarize(diff_cpwer, pt_cpwer_a, pt_cpwer_b),
   }
@@ -300,6 +301,7 @@ def compute_corpus_metrics(
     hyp_text_field: str = "hyp_text",
     ref_spk_field: str = "ref_spk",
     hyp_spk_field: str = "hyp_spk_llm",
+    baseline_spk_field: str = "hyp_spk",
     bootstrap_samples: int = 0,
     seed: int = 42,
 ) -> Dict[str, Any]:
@@ -322,12 +324,15 @@ def compute_corpus_metrics(
         ref_text_field=ref_text_field,
         hyp_text_field=hyp_text_field,
         ref_spk_field=ref_spk_field,
-        hyp_spk_field="hyp_spk",
+        hyp_spk_field=baseline_spk_field,
     )
     res["bootstrap_ci"] = bootstrap_paired_ci(
-        base_eval["utterances"],
         res["utterances"],
+        base_eval["utterances"],
         num_resamples=bootstrap_samples,
         seed=seed,
+    )
+    res["bootstrap_ci"]["comparison"] = (
+        f"{hyp_spk_field} - {baseline_spk_field}"
     )
   return res

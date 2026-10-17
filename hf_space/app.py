@@ -1,4 +1,4 @@
-"""Gradio 5.50.0 CPU end-to-end audio demo for the Diarizers pipeline."""
+"""Gradio 5.50.0 CPU end-to-end audio demo for Diarizers v1.0.1."""
 
 from __future__ import annotations
 
@@ -21,13 +21,16 @@ import diarizers  # noqa: E402
 
 DEFAULT_GGUF_REPO = "diarizers-community/DiarizationLM-Gemma-4-E4B-v1"
 DEFAULT_GGUF_FILE = "DiarizationLM-Gemma-4-E4B-v1-q4_k_m.gguf"
-EXAMPLE_AUDIO_PATH = os.path.join(
+EXAMPLE_AUDIO_1 = os.path.join(
     os.path.dirname(__file__), "examples", "example_conversation.wav"
+)
+EXAMPLE_AUDIO_2 = os.path.join(
+    os.path.dirname(__file__), "examples", "example_2_meeting_3spk.wav"
 )
 
 _ASR_CACHE: dict[str, diarizers.WhisperWordASR] = {}
 _DIARIZER_CACHE: dict[str, diarizers.ECAPASpectralDiarizer] = {}
-_REFINER_CACHE: dict[bool, diarizers.DiarizationLMRefiner] = {}
+_REFINER_CACHE: dict[tuple[bool, int], diarizers.DiarizationLMRefiner] = {}
 
 
 def _get_asr(model_name: str) -> diarizers.WhisperWordASR:
@@ -60,10 +63,16 @@ def _get_diarizer(preset_name: str) -> diarizers.ECAPASpectralDiarizer:
   return _DIARIZER_CACHE[preset.name]
 
 
-def _get_refiner(use_lg_tpst: bool) -> diarizers.DiarizationLMRefiner:
-  key = bool(use_lg_tpst)
+def _get_refiner(
+    use_lg_tpst: bool,
+    max_span_words: int = 5,
+) -> diarizers.DiarizationLMRefiner:
+  key = (bool(use_lg_tpst), int(max_span_words))
   if key not in _REFINER_CACHE:
-    p_cfg = diarizers.PromptConfig(use_locality_gate=key)
+    p_cfg = diarizers.PromptConfig(
+        use_locality_gate=bool(use_lg_tpst),
+        max_local_span_words=int(max_span_words),
+    )
     _REFINER_CACHE[key] = diarizers.DiarizationLMRefiner(
         model_path_or_repo=DEFAULT_GGUF_REPO,
         gguf_filename=DEFAULT_GGUF_FILE,
@@ -239,11 +248,11 @@ def run_audio_pipeline(
 def build_demo() -> gr.Blocks:
   """Builds the Gradio Blocks interface for the end-to-end audio pipeline."""
   with gr.Blocks(
-      title="Diarizers — End-to-End Audio ASR + Diarization + DiarizationLM"
+      title="Diarizers v1.0.1 — End-to-End Audio ASR + Diarization + LLM"
   ) as demo:
     gr.Markdown(
-        "# 🎙️ Diarizers — End-to-End Open-Source ASR, Speaker Diarization & "
-        "DiarizationLM\n"
+        "# 🎙️ Diarizers v1.0.1 — End-to-End Open-Source ASR, Speaker "
+        "Diarization & DiarizationLM\n"
         "> End-to-end Apache-2.0/MIT audio pipeline combining **Whisper ASR** "
         "+ **`pyannote/segmentation-3.0`** + "
         "**`speechbrain/spkrec-ecapa-voxceleb`** "
@@ -266,8 +275,8 @@ def build_demo() -> gr.Blocks:
             sources=["upload", "microphone"],
             type="filepath",
             value=(
-                EXAMPLE_AUDIO_PATH
-                if os.path.isfile(EXAMPLE_AUDIO_PATH)
+                EXAMPLE_AUDIO_1
+                if os.path.isfile(EXAMPLE_AUDIO_1)
                 else None
             ),
             label="Input Conversation Audio (.wav / .mp3 / .flac)",
@@ -327,24 +336,37 @@ def build_demo() -> gr.Blocks:
             label="Before DiarizationLM (Acoustic Baseline)", lines=5
         )
         out_after_llm = gr.Textbox(
-            label="After DiarizationLM-Gemma-4-E4B-v1 (Refined Transcript)",
+            label=(
+                "After DiarizationLM-Gemma-4-E4B-v1 "
+                "(Refined Transcript)"
+            ),
             lines=5,
         )
         out_rttm = gr.Textbox(label="NIST RTTM Output", lines=5)
         out_srt = gr.Textbox(label="SRT Subtitles", lines=5)
 
-    if os.path.isfile(EXAMPLE_AUDIO_PATH):
+    example_rows = []
+    if os.path.isfile(EXAMPLE_AUDIO_1):
+      example_rows.append([
+          EXAMPLE_AUDIO_1,
+          "openai/whisper-base.en",
+          "Fisher Telephony (2 speakers)",
+          2,
+          True,
+          True,
+      ])
+    if os.path.isfile(EXAMPLE_AUDIO_2):
+      example_rows.append([
+          EXAMPLE_AUDIO_2,
+          "openai/whisper-base.en",
+          "AMI Meeting (3-5 speakers)",
+          3,
+          True,
+          True,
+      ])
+    if example_rows:
       gr.Examples(
-          examples=[
-              [
-                  EXAMPLE_AUDIO_PATH,
-                  "openai/whisper-base.en",
-                  "Fisher Telephony (2 speakers)",
-                  2,
-                  True,
-                  True,
-              ]
-          ],
+          examples=example_rows,
           inputs=[
               audio_in,
               asr_dd,

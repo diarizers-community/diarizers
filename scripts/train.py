@@ -14,7 +14,7 @@ def main() -> None:
   )
   parser.add_argument(
       "--model_name_or_path",
-      default="google/gemma-4-e4b-it",
+      default="google/gemma-4-E4B",
       help="Base Hugging Face model ID or local path.",
   )
   parser.add_argument(

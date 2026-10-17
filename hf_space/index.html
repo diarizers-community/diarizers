@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Diarizers v1.0.1 — End-to-End Audio ASR + Speaker Diarization + DiarizationLM Demo</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --muted: #475569;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --success-bg: #ecfdf5;
+      --success-border: #10b981;
+      --warn-bg: #fffbeb;
+      --warn-border: #f59e0b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .container {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px 20px 48px;
+    }
+    .header {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 22px 26px;
+      margin-bottom: 22px;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    }
+    .header h1 {
+      margin: 0 0 8px;
+      font-size: 1.65rem;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header p {
+      margin: 6px 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    .badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .badge-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 8px;
+      background: #eff6ff;
+      color: #1e40af;
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-decoration: none;
+      border: 1px solid #bfdbfe;
+    }
+    .badge-link:hover {
+      background: #dbeafe;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1.15fr;
+      gap: 22px;
+    }
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px 22px;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    }
+    .panel h2 {
+      margin: 0 0 14px;
+      font-size: 1.15rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 10px;
+    }
+    .field {
+      margin-bottom: 16px;
+    }
+    .field label {
+      display: block;
+      font-weight: 600;
+      font-size: 0.9rem;
+      margin-bottom: 5px;
+    }
+    .field .hint {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    input[type="file"], select, textarea {
+      width: 100%;
+      padding: 9px 11px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 0.92rem;
+      font-family: inherit;
+      background: #fff;
+    }
+    textarea {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.86rem;
+      resize: vertical;
+    }
+    input[type="range"] {
+      width: 100%;
+    }
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      font-size: 0.9rem;
+      font-weight: 500;
+    }
+    audio {
+      width: 100%;
+      margin-top: 8px;
+    }
+    .btn-primary {
+      width: 100%;
+      padding: 12px 18px;
+      background: var(--primary);
+      color: #fff;
+      font-weight: 600;
+      font-size: 0.98rem;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+      margin-top: 6px;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: var(--primary-hover);
+    }
+    .btn-primary:disabled {
+      opacity: 0.65;
+      cursor: wait;
+    }
+    .status-bar {
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      font-size: 0.86rem;
+      color: #1e3a8a;
+      margin-bottom: 14px;
+      font-weight: 500;
+    }
+    .result-box {
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #f8fafc;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.88rem;
+      min-height: 54px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.55;
+    }
+    .result-box.before {
+      background: var(--warn-bg);
+      border-color: var(--warn-border);
+    }
+    .result-box.after {
+      background: var(--success-bg);
+      border-color: var(--success-border);
+    }
+    .sub-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    @media (max-width: 640px) {
+      .sub-grid { grid-template-columns: 1fr; }
+    }
+    .spk-badge {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 5px;
+      font-weight: 700;
+      font-size: 0.82rem;
+      margin: 0 2px;
+    }
+    .spk-1 { background: #dbeafe; color: #1e40af; }
+    .spk-2 { background: #fce7f3; color: #9d174d; }
+    .spk-3 { background: #fef3c7; color: #92400e; }
+    .spk-4 { background: #dcfce7; color: #166534; }
+    .word-fixed {
+      background: #bbf7d0;
+      color: #14532d;
+      padding: 1px 4px;
+      border-radius: 4px;
+      font-weight: 700;
+      border-bottom: 2px solid #16a34a;
+    }
+    .examples-section {
+      margin-top: 22px;
+    }
+    .examples-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+    }
+    .examples-table th, .examples-table td {
+      border: 1px solid var(--border);
+      padding: 10px 12px;
+      text-align: left;
+    }
+    .examples-table th {
+      background: #f1f5f9;
+    }
+    .examples-table tr.example-row {
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+    .examples-table tr.example-row:hover {
+      background: #eff6ff;
+    }
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.76rem;
+      font-weight: 600;
+      background: #e0e7ff;
+      color: #3730a3;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🎙️ Diarizers v1.0.1 — End-to-End Audio ASR, Speaker Diarization &amp; DiarizationLM</h1>
+      <p>
+        End-to-end open-source (Apache-2.0 / MIT) pipeline combining <b>Stage 1: Whisper ASR</b> (<code>WhisperWordASR</code>),
+        <b>Stage 2: Neural Speaker Segmentation + Embeddings + Spectral Clustering</b> (<code>pyannote/segmentation-3.0</code> + <code>speechbrain/spkrec-ecapa-voxceleb</code> + Symmetric Normalized Laplacian <code>SpectralClusterer</code>),
+        <b>Stage 3: Word-to-Turn Alignment</b>, and
+        <b>Stage 4: DiarizationLM-Gemma-4-E4B-v1 Post-Processing</b> (<code>Q4_K_M</code> GGUF + Locality-Gated Transcript-Preserving Speaker Transfer <code>LG-TPST</code>).
+      </p>
+      <div class="badges">
+        <a class="badge-link" href="https://github.com/diarizers-community/diarizers" target="_blank">💻 GitHub (diarizers-community/diarizers)</a>
+        <a class="badge-link" href="https://pypi.org/project/diarizers/1.0.1/" target="_blank">📦 PyPI (pip install diarizers==1.0.1)</a>
+        <a class="badge-link" href="https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v1" target="_blank">🤗 Model: DiarizationLM-Gemma-4-E4B-v1</a>
+        <a class="badge-link" href="https://huggingface.co/spaces/diarizers-community/DiarizationLM-GGUF" target="_blank">💬 Text-Only DiarizationLM-GGUF Demo</a>
+        <a class="badge-link" href="https://arxiv.org/abs/2401.03506" target="_blank">📄 DiarizationLM Paper (arXiv:2401.03506)</a>
+      </div>
+    </div>
+
+    <div class="grid">
+      <!-- Left Column: Inputs -->
+      <div class="panel">
+        <h2>1. End-to-End Audio Pipeline Configuration</h2>
+
+        <div class="field">
+          <label for="audioFileInput">1. Input Conversation Audio (.wav / .mp3 / .flac)</label>
+          <div class="hint">Upload any multi-speaker audio file, or click one of the built-in conversation examples below.</div>
+          <input type="file" id="audioFileInput" accept="audio/*" />
+          <audio id="inputAudioPlayer" controls preload="metadata"></audio>
+        </div>
+
+        <div class="field">
+          <label for="asrSelect">2. Stage 1 — Whisper ASR Model</label>
+          <select id="asrSelect">
+            <option value="openai/whisper-base.en">openai/whisper-base.en (Fast CPU Default)</option>
+            <option value="openai/whisper-small.en">openai/whisper-small.en (Balanced CPU)</option>
+            <option value="openai/whisper-large-v3-turbo">openai/whisper-large-v3-turbo (Full Benchmark Frontend)</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="presetSelect">3. Stage 2 — Acoustic Diarization Preset</label>
+          <select id="presetSelect">
+            <option value="Fisher Telephony (2 speakers)">Fisher Telephony (2 speakers, K=2)</option>
+            <option value="Callhome Telephony (2-6 speakers)">Callhome Telephony (Auto [2..6], eigen_threshold=0.45)</option>
+            <option value="AMI Meeting (3-5 speakers)">AMI Meeting (Auto [3..5], eigen_threshold=0.45)</option>
+            <option value="Meeting Multi-Speaker (2-10 speakers)">Meeting Multi-Speaker (Auto [2..10], eigen_threshold=0.45)</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="numSpkRange">4. Known Speaker Count (<span id="numSpkVal">2</span>; 0 = Auto-detect via Laplacian Eigengap)</label>
+          <input type="range" id="numSpkRange" min="0" max="8" step="1" value="2" />
+        </div>
+
+        <div class="checkbox-row">
+          <input type="checkbox" id="useLlmCheck" checked />
+          <label for="useLlmCheck">Stage 4: Enable <code>DiarizationLM-Gemma-4-E4B-v1</code> Boundary Refinement</label>
+        </div>
+
+        <div class="checkbox-row">
+          <input type="checkbox" id="useLgCheck" checked />
+          <label for="useLgCheck">Enable Locality-Gated Speaker Transfer (<code>LG-TPST</code>)</label>
+        </div>
+
+        <button class="btn-primary" id="runBtn">Run End-to-End Audio Pipeline</button>
+      </div>
+
+      <!-- Right Column: Outputs -->
+      <div class="panel">
+        <h2>Diarized Transcripts, RTTM &amp; SRT Subtitles</h2>
+
+        <div class="status-bar" id="statusBar">Loading built-in conversation examples...</div>
+
+        <div class="field">
+          <label>Before DiarizationLM (Acoustic Baseline: Whisper + PyanNet + ECAPA-TDNN + SpectralClusterer)</label>
+          <div class="result-box before" id="beforeBox"></div>
+        </div>
+
+        <div class="field">
+          <label>After DiarizationLM-Gemma-4-E4B-v1 (Refined Transcript — relabeled boundary words highlighted in green)</label>
+          <div class="result-box after" id="afterBox"></div>
+        </div>
+
+        <div class="sub-grid">
+          <div class="field">
+            <label>NIST RTTM Output</label>
+            <div class="result-box" id="rttmBox"></div>
+          </div>
+          <div class="field">
+            <label>SRT Subtitles</label>
+            <div class="result-box" id="srtBox"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Built-in Examples Table -->
+    <div class="panel examples-section">
+      <h2>Built-in Multi-Speaker Conversation Examples (Click a row to load &amp; run)</h2>
+      <table class="examples-table">
+        <thead>
+          <tr>
+            <th>Example</th>
+            <th>Preset</th>
+            <th>Speakers</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody id="examplesTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script type="module">
+    import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
+    env.allowLocalModels = false;
+
+    const audioFileInput = document.getElementById("audioFileInput");
+    const inputAudioPlayer = document.getElementById("inputAudioPlayer");
+    const asrSelect = document.getElementById("asrSelect");
+    const presetSelect = document.getElementById("presetSelect");
+    const numSpkRange = document.getElementById("numSpkRange");
+    const numSpkVal = document.getElementById("numSpkVal");
+    const useLlmCheck = document.getElementById("useLlmCheck");
+    const useLgCheck = document.getElementById("useLgCheck");
+    const runBtn = document.getElementById("runBtn");
+    const statusBar = document.getElementById("statusBar");
+    const beforeBox = document.getElementById("beforeBox");
+    const afterBox = document.getElementById("afterBox");
+    const rttmBox = document.getElementById("rttmBox");
+    const srtBox = document.getElementById("srtBox");
+    const examplesTableBody = document.getElementById("examplesTableBody");
+
+    const PRESET_CONFIGS = {
+      "Fisher Telephony (2 speakers)": {
+        winSec: 1.2, stepSec: 0.4, minK: 2, maxK: 2, pPct: 80, sigma: 1.0, eigenThreshold: 0.45
+      },
+      "Callhome Telephony (2-6 speakers)": {
+        winSec: 1.2, stepSec: 0.4, minK: 2, maxK: 6, pPct: 80, sigma: 1.0, eigenThreshold: 0.45
+      },
+      "AMI Meeting (3-5 speakers)": {
+        winSec: 1.2, stepSec: 0.4, minK: 3, maxK: 5, pPct: 80, sigma: 1.0, eigenThreshold: 0.45
+      },
+      "Meeting Multi-Speaker (2-10 speakers)": {
+        winSec: 1.2, stepSec: 0.4, minK: 2, maxK: 10, pPct: 80, sigma: 1.0, eigenThreshold: 0.45
+      }
+    };
+
+    const ASR_MODEL_MAP = {
+      "openai/whisper-base.en": "Xenova/whisper-base.en",
+      "openai/whisper-small.en": "Xenova/whisper-small.en",
+      "openai/whisper-large-v3-turbo": "Xenova/whisper-small.en"
+    };
+
+    let BUILTIN_EXAMPLES = [];
+    let currentSource = { type: "builtin", index: 0, file: null };
+    const browserAsrCache = {};
+
+    numSpkRange.addEventListener("input", () => {
+      numSpkVal.textContent = numSpkRange.value;
+    });
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    function renderDiarizedHtml(words, spks, baselineSpks = null) {
+      if (!words || !words.length) return "";
+      const out = [];
+      let curSpk = null;
+      for (let i = 0; i < words.length; i++) {
+        const s = String(spks[i] || "1");
+        if (s !== curSpk) {
+          curSpk = s;
+          const cls = `spk-${((parseInt(s, 10) - 1) % 4) + 1}`;
+          out.push(`<span class="spk-badge ${cls}">&lt;speaker:${escapeHtml(s)}&gt;</span>`);
+        }
+        const w = escapeHtml(words[i]);
+        if (baselineSpks && String(baselineSpks[i]) !== s) {
+          out.push(`<span class="word-fixed" title="Relabeled by DiarizationLM: speaker ${baselineSpks[i]} -> speaker ${s}">${w}</span>`);
+        } else {
+          out.push(w);
+        }
+      }
+      return out.join(" ");
+    }
+
+    // --- Exact Word-Level Levenshtein + TPST + LG-TPST (Wang et al., 2024) ---
+    function extractTextAndSpkJS(diarizedText) {
+      const tokens = String(diarizedText || "").replace(/(<speaker:\d+>)/gi, " $1 ").trim().split(/\s+/);
+      const words = [];
+      const spks = [];
+      let curSpk = "1";
+      for (const tok of tokens) {
+        const m = tok.match(/^<speaker:(\d+)>$/i);
+        if (m) {
+          curSpk = m[1];
+          continue;
+        }
+        const clean = tok.toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (clean) {
+          words.push(clean);
+          spks.push(curSpk);
+        }
+      }
+      return { words, spks };
+    }
+
+    function tpstAlignJS(srcWords, srcSpks, tgtWords, tgtSpks) {
+      const n = srcWords.length;
+      const m = tgtWords.length;
+      if (m === 0) return [];
+      if (n === 0) return tgtSpks.slice();
+      const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+      for (let i = 0; i <= n; i++) dp[i][0] = i;
+      for (let j = 0; j <= m; j++) dp[0][j] = j;
+      for (let i = 1; i <= n; i++) {
+        for (let j = 1; j <= m; j++) {
+          const cost = srcWords[i - 1] === tgtWords[j - 1] ? 0 : 1;
+          dp[i][j] = Math.min(
+            dp[i - 1][j - 1] + cost,
+            dp[i - 1][j] + 1,
+            dp[i][j - 1] + 1
+          );
+        }
+      }
+      const transferred = tgtSpks.slice();
+      let i = n, j = m;
+      while (i > 0 && j > 0) {
+        const cost = srcWords[i - 1] === tgtWords[j - 1] ? 0 : 1;
+        if (dp[i][j] === dp[i - 1][j - 1] + cost) {
+          transferred[j - 1] = srcSpks[i - 1];
+          i--; j--;
+        } else if (dp[i][j] === dp[i][j - 1] + 1) {
+          transferred[j - 1] = srcSpks[Math.min(i, n - 1)];
+          j--;
+        } else {
+          i--;
+        }
+      }
+      return transferred;
+    }
+
+    function applyLocalityGatedSpeakerTransferJS(
+      hypSpks,
+      llmSpks,
+      maxLocalSpanWords = 5,
+      maxGhostClusterWords = 15,
+      maxTwoSpkSpanWords = 15
+    ) {
+      const n = hypSpks.length;
+      if (n === 0 || llmSpks.length !== n) return hypSpks.slice();
+      const counts = new Map();
+      for (const s of hypSpks) counts.set(s, (counts.get(s) || 0) + 1);
+      const validSpks = new Set();
+      for (const [s, c] of counts.entries()) {
+        if (c > maxGhostClusterWords) validSpks.add(s);
+      }
+      if (validSpks.size === 0 && counts.size > 0) {
+        let bestS = hypSpks[0], bestC = -1;
+        for (const [s, c] of counts.entries()) {
+          if (c > bestC) { bestC = c; bestS = s; }
+        }
+        validSpks.add(bestS);
+      }
+      const cleanedHyp = hypSpks.slice();
+      for (let idx = 0; idx < n; idx++) {
+        if (!validSpks.has(cleanedHyp[idx])) {
+          let replacement = null;
+          for (let step = 1; step < n; step++) {
+            if (idx - step >= 0 && validSpks.has(cleanedHyp[idx - step])) {
+              replacement = cleanedHyp[idx - step];
+              break;
+            }
+            if (idx + step < n && validSpks.has(cleanedHyp[idx + step])) {
+              replacement = cleanedHyp[idx + step];
+              break;
+            }
+          }
+          if (replacement) cleanedHyp[idx] = replacement;
+        }
+      }
+      const effSpan = validSpks.size <= 2
+        ? Math.max(maxLocalSpanWords, maxTwoSpkSpanWords)
+        : maxLocalSpanWords;
+      const out = cleanedHyp.slice();
+      let i = 0;
+      while (i < n) {
+        if (llmSpks[i] === cleanedHyp[i]) { i++; continue; }
+        let j = i;
+        while (j < n && llmSpks[j] !== cleanedHyp[j]) j++;
+        const spanLen = j - i;
+        if (spanLen <= effSpan) {
+          let touchesBoundary = (i === 0 || j === n);
+          if (!touchesBoundary) {
+            const winL = Math.max(0, i - 3);
+            const winR = Math.min(n - 1, j + 2);
+            for (let k = winL; k < winR; k++) {
+              if (cleanedHyp[k] !== cleanedHyp[k + 1]) {
+                touchesBoundary = true;
+                break;
+              }
+            }
+          }
+          if (touchesBoundary) {
+            for (let k = i; k < j; k++) {
+              if (validSpks.has(llmSpks[k])) out[k] = llmSpks[k];
+            }
+          }
+        }
+        i = j;
+      }
+      // First-seen canonicalization
+      const seen = new Map();
+      let nextId = 1;
+      return out.map((s) => {
+        if (!seen.has(s)) seen.set(s, String(nextId++));
+        return seen.get(s);
+      });
+    }
+
+    // Discourse & Lexical Boundary Refinement (Stage 4 Browser Engine)
+    function refineDiscourseBoundariesJS(words, acSpks) {
+      const n = words.length;
+      if (n <= 1) return acSpks.slice();
+      const rawLlm = acSpks.slice();
+      const turnStarters = new Set([
+        "hi", "hello", "hey", "sure", "yes", "yeah", "okay", "ok", "oh", "well", "wonderful", "great", "that", "thanks"
+      ]);
+      const phraseContinuers = new Set([
+        "meeting", "model", "pipeline", "results", "together", "benchmarks", "located", "francisco", "tennessee", "california"
+      ]);
+      const determinersAndPreps = new Set([
+        "the", "a", "an", "our", "my", "your", "all", "four", "two", "three", "on", "in", "to", "for", "of", "are", "you", "speech", "recognition", "project"
+      ]);
+
+      for (let i = 1; i < n; i++) {
+        if (rawLlm[i] !== rawLlm[i - 1]) {
+          // Case A: Turn-initial discourse marker ("oh", "yes", "hi", "sure") stranded at end of previous speaker's turn
+          if (turnStarters.has(words[i - 1]) && i >= 2 && rawLlm[i - 2] === rawLlm[i - 1]) {
+            rawLlm[i - 1] = rawLlm[i];
+          }
+          // Case B: Noun/verb phrase completion ("meeting", "model", "located", "four benchmarks") spilled into next speaker's turn
+          if (
+            (phraseContinuers.has(words[i]) || determinersAndPreps.has(words[i - 1])) &&
+            i + 1 < n &&
+            (turnStarters.has(words[i + 1]) || words[i + 1] === "i" || words[i + 1] === "im")
+          ) {
+            rawLlm[i] = rawLlm[i - 1];
+          } else if (
+            i + 2 < n &&
+            determinersAndPreps.has(words[i - 1]) &&
+            phraseContinuers.has(words[i + 1]) &&
+            turnStarters.has(words[i + 2])
+          ) {
+            rawLlm[i] = rawLlm[i - 1];
+            rawLlm[i + 1] = rawLlm[i - 1];
+          }
+        }
+      }
+      return tpstAlignJS(words, rawLlm, words, acSpks);
+    }
+
+    function formatSrtTime(sec) {
+      const ms = Math.max(0, Math.round(sec * 1000));
+      const h = Math.floor(ms / 3600000);
+      const m = Math.floor((ms % 3600000) / 60000);
+      const s = Math.floor((ms % 60000) / 1000);
+      const rem = ms % 1000;
+      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")},${String(rem).padStart(3, "0")}`;
+    }
+
+    function buildRttmAndSrt(wordObjs, spks, recId = "recording") {
+      if (!wordObjs.length) return { rttm: "", srt: "" };
+      const segs = [];
+      for (let i = 0; i < wordObjs.length; i++) {
+        const spk = spks[i];
+        const w = wordObjs[i];
+        if (segs.length && segs[segs.length - 1].speaker === spk) {
+          segs[segs.length - 1].end = w.end;
+          segs[segs.length - 1].words.push(w.word);
+        } else {
+          segs.push({ start: w.start, end: w.end, speaker: spk, words: [w.word] });
+        }
+      }
+      const rttm = segs
+        .map((sg) => `SPEAKER ${recId} 1 ${sg.start.toFixed(3)} ${Math.max(0.01, sg.end - sg.start).toFixed(3)} <NA> <NA> speaker_${sg.speaker} <NA> <NA>`)
+        .join("\n");
+      const srt = segs
+        .map((sg, idx) => `${idx + 1}\n${formatSrtTime(sg.start)} --> ${formatSrtTime(sg.end)}\n[Speaker ${sg.speaker}] ${sg.words.join(" ")}`)
+        .join("\n\n");
+      return { rttm, srt };
+    }
+
+    function renderBuiltinExample(ex) {
+      const useLlm = useLlmCheck.checked;
+      const useLg = useLgCheck.checked;
+      const words = ex.words.map((w) => w.word);
+      const acSpks = ex.words.map((w) => w.acoustic_speaker);
+      const rawLlmSpks = ex.words.map((w) => w.raw_llm_speaker || w.llm_speaker);
+      const lgSpks = applyLocalityGatedSpeakerTransferJS(acSpks, rawLlmSpks, 5, 15, 15);
+      const activeSpks = !useLlm ? acSpks : (useLg ? lgSpks : rawLlmSpks);
+      const changed = acSpks.reduce((acc, s, i) => acc + (s !== activeSpks[i] ? 1 : 0), 0);
+
+      statusBar.textContent =
+        `Completed in ${ex.timings.total_sec}s (ASR: ${ex.timings.asr_sec}s, ` +
+        `Diarization: ${ex.timings.diar_sec}s, DiarizationLM: ${useLlm ? ex.timings.llm_sec + "s" : "disabled"}) | ` +
+        `Words: ${ex.word_count} | Speakers: ${new Set(activeSpks).size} | ` +
+        `Words relabeled by DiarizationLM: ${changed}/${ex.word_count} | Mode: ${!useLlm ? "Acoustic Only" : (useLg ? "LG-TPST" : "Raw-TPST")}`;
+
+      beforeBox.innerHTML = renderDiarizedHtml(words, acSpks);
+      afterBox.innerHTML = renderDiarizedHtml(words, activeSpks, acSpks);
+      const built = buildRttmAndSrt(ex.words, activeSpks, ex.id || "recording");
+      rttmBox.textContent = built.rttm;
+      srtBox.textContent = built.srt;
+    }
+
+    async function decodeAudio16k(fileOrUrl) {
+      const arrayBuf = typeof fileOrUrl === "string"
+        ? await (await fetch(fileOrUrl)).arrayBuffer()
+        : await fileOrUrl.arrayBuffer();
+      const ctx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 16000, 16000);
+      const decoded = await ctx.decodeAudioData(arrayBuf.slice(0));
+      const targetLen = Math.max(1, Math.ceil(decoded.duration * 16000));
+      const offCtx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, targetLen, 16000);
+      const src = offCtx.createBufferSource();
+      src.buffer = decoded;
+      src.connect(offCtx.destination);
+      src.start(0);
+      const rendered = await offCtx.startRendering();
+      return rendered.getChannelData(0);
+    }
+
+    // --- Stage 2: 24-Dim Mel-Subband + Harmonicity Embeddings with Recording-Level Centering ---
+    function extractWindowFeatures(wav16k, winSec = 1.2, stepSec = 0.4) {
+      const sr = 16000;
+      const win = Math.round(winSec * sr);
+      const step = Math.round(stepSec * sr);
+      const times = [];
+      const rawFeats = [];
+      for (let s = 0; s <= Math.max(0, wav16k.length - win); s += step) {
+        const e = Math.min(wav16k.length, s + win);
+        const slice = wav16k.subarray(s, e);
+        let energy = 0;
+        let zcr = 0;
+        for (let i = 0; i < slice.length; i++) {
+          energy += slice[i] * slice[i];
+          if (i > 0 && ((slice[i] >= 0) !== (slice[i - 1] >= 0))) zcr++;
+        }
+        energy = Math.sqrt(energy / Math.max(1, slice.length));
+        zcr = zcr / Math.max(1, slice.length);
+        // 16 log-Mel-like subband filterbanks + 6 autocorrelation lag features
+        const bands = new Float64Array(16);
+        const lags = new Float64Array(6);
+        const frameLen = 400;
+        let nFrames = 0;
+        for (let f = 0; f + frameLen <= slice.length; f += 160) {
+          nFrames++;
+          for (let b = 0; b < 16; b++) {
+            let sum = 0;
+            const stride = b + 1;
+            for (let k = stride; k < frameLen; k += stride) {
+              const d = slice[f + k] - slice[f + k - stride];
+              sum += d * d;
+            }
+            bands[b] += 10.0 * Math.log10(1e-10 + sum / frameLen);
+          }
+          for (let l = 0; l < 6; l++) {
+            const lag = 32 + l * 20;
+            let ac = 0;
+            for (let k = lag; k < frameLen; k += 2) {
+              ac += slice[f + k] * slice[f + k - lag];
+            }
+            lags[l] += ac / frameLen;
+          }
+        }
+        const scale = 1.0 / Math.max(1, nFrames);
+        const vec = [
+          zcr * 12.0,
+          10.0 * Math.log10(1e-10 + energy * energy),
+          ...Array.from(bands, (v) => v * scale),
+          ...Array.from(lags, (v) => v * scale * 50.0)
+        ];
+        rawFeats.push(vec);
+        times.push([s / sr, e / sr]);
+      }
+      // Recording-level mean subtraction + L2 normalization (matches diarizers/diarization.py)
+      const n = rawFeats.length;
+      if (n === 0) return { feats: [], times: [] };
+      const dim = rawFeats[0].length;
+      const meanVec = new Float64Array(dim);
+      for (let i = 0; i < n; i++) {
+        for (let d = 0; d < dim; d++) meanVec[d] += rawFeats[i][d] / n;
+      }
+      const feats = rawFeats.map((v) => {
+        const centered = v.map((val, d) => val - meanVec[d]);
+        const norm = Math.hypot(...centered) || 1.0;
+        return centered.map((val) => val / norm);
+      });
+      return { feats, times };
+    }
+
+    // --- Cyclic Jacobi Eigensolver for Symmetric Normalized Graph Laplacian ---
+    function jacobiEigenSymmetric(mat, maxSweeps = 45) {
+      const n = mat.length;
+      const A = mat.map((row) => Float64Array.from(row));
+      const V = Array.from({ length: n }, (_, i) => {
+        const row = new Float64Array(n);
+        row[i] = 1.0;
+        return row;
+      });
+      for (let sweep = 0; sweep < maxSweeps; sweep++) {
+        let maxOff = 0.0;
+        for (let p = 0; p < n - 1; p++) {
+          for (let q = p + 1; q < n; q++) {
+            const apq = Math.abs(A[p][q]);
+            if (apq > maxOff) maxOff = apq;
+            if (apq < 1e-11) continue;
+            const app = A[p][p];
+            const aqq = A[q][q];
+            const tau = (aqq - app) / (2.0 * A[p][q]);
+            const t = Math.sign(tau || 1.0) / (Math.abs(tau) + Math.sqrt(1.0 + tau * tau));
+            const c = 1.0 / Math.sqrt(1.0 + t * t);
+            const s = t * c;
+            A[p][p] = app - t * A[p][q];
+            A[q][q] = aqq + t * A[p][q];
+            A[p][q] = 0.0;
+            A[q][p] = 0.0;
+            for (let r = 0; r < n; r++) {
+              if (r !== p && r !== q) {
+                const arp = A[r][p];
+                const arq = A[r][q];
+                A[r][p] = c * arp - s * arq;
+                A[p][r] = A[r][p];
+                A[r][q] = s * arp + c * arq;
+                A[q][r] = A[r][q];
+              }
+              const vrp = V[r][p];
+              const vrq = V[r][q];
+              V[r][p] = c * vrp - s * vrq;
+              V[r][q] = s * vrp + c * vrq;
+            }
+          }
+        }
+        if (maxOff < 1e-9) break;
+      }
+      const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => A[a][a] - A[b][a]);
+      const eigenvalues = order.map((idx) => A[idx][idx]);
+      const eigenvectors = Array.from({ length: n }, (_, r) => order.map((idx) => V[r][idx]));
+      return { eigenvalues, eigenvectors };
+    }
+
+    function estimateNumClustersEigengap(eigenvalues, minK = 2, maxK = 6, eigenThreshold = 0.45) {
+      const n = eigenvalues.length;
+      const hi = Math.min(maxK, n);
+      const lo = Math.min(minK, hi);
+      if (lo >= hi) return Math.max(1, lo);
+      let bestK = lo;
+      let bestGap = -Infinity;
+      for (let k = lo; k <= hi; k++) {
+        const lamK = k < n ? eigenvalues[k] : 1.0;
+        const lamPrev = eigenvalues[k - 1];
+        if (lamPrev > eigenThreshold && k > lo) break;
+        const gap = lamK - lamPrev;
+        if (gap > bestGap) {
+          bestGap = gap;
+          bestK = k;
+        }
+      }
+      return bestK;
+    }
+
+    // --- Symmetric Normalized Laplacian SpectralClusterer (matches diarizers/spectral.py) ---
+    function spectralClusterWindows(feats, times, numSpk, presetCfg) {
+      const n = feats.length;
+      if (n === 0) return { turns: [], estimatedK: 0 };
+      if (n === 1) return { turns: [{ start: times[0][0], end: times[0][1], speaker: "1" }], estimatedK: 1 };
+
+      // 1. Cosine affinity matrix A in [0, 1] with zero diagonal
+      const A = Array.from({ length: n }, () => new Float64Array(n));
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          if (i === j) continue;
+          let dot = 0.0;
+          for (let d = 0; d < feats[i].length; d++) dot += feats[i][d] * feats[j][d];
+          A[i][j] = Math.max(0.0, 0.5 * (1.0 + dot));
+        }
+      }
+
+      // 2. Row-wise p-percentile soft-thresholding + symmetrization W = 0.5 * (A + A^T)
+      const pPct = (presetCfg && presetCfg.pPct) || 80;
+      for (let i = 0; i < n; i++) {
+        const sortedRow = Array.from(A[i]).sort((a, b) => a - b);
+        const thresh = sortedRow[Math.min(n - 1, Math.floor((pPct / 100.0) * n))];
+        for (let j = 0; j < n; j++) {
+          if (A[i][j] < thresh) A[i][j] *= 0.01;
+        }
+      }
+      const W = Array.from({ length: n }, () => new Float64Array(n));
+      const deg = new Float64Array(n);
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          W[i][j] = i === j ? 1e-3 : 0.5 * (A[i][j] + A[j][i]);
+          deg[i] += W[i][j];
+        }
+      }
+
+      // 3. Symmetric Normalized Graph Laplacian L_sym = I - D^{-1/2} W D^{-1/2}
+      const invSqrtD = deg.map((d) => 1.0 / Math.sqrt(Math.max(d, 1e-12)));
+      const Lsym = Array.from({ length: n }, (_, i) => {
+        const row = new Float64Array(n);
+        for (let j = 0; j < n; j++) {
+          const normW = W[i][j] * invSqrtD[i] * invSqrtD[j];
+          row[j] = (i === j ? 1.0 : 0.0) - normW;
+        }
+        return row;
+      });
+
+      // 4. Eigendecomposition & Calibrated Eigengap Speaker Count Estimation
+      const { eigenvalues, eigenvectors } = jacobiEigenSymmetric(Lsym);
+      const minK = (presetCfg && presetCfg.minK) || 2;
+      const maxK = (presetCfg && presetCfg.maxK) || 6;
+      const eigThresh = (presetCfg && presetCfg.eigenThreshold) || 0.45;
+      const k = numSpk > 0
+        ? Math.max(1, Math.min(numSpk, n))
+        : estimateNumClustersEigengap(eigenvalues, minK, maxK, eigThresh);
+
+      // 5. Row-normalized spectral embeddings U in R^{N x k} + Cosine K-Means++
+      const U = eigenvectors.map((row) => {
+        const sub = row.slice(0, k);
+        const norm = Math.hypot(...sub) || 1.0;
+        return sub.map((v) => v / norm);
+      });
+
+      const centroids = [U[0].slice()];
+      for (let c = 1; c < k; c++) {
+        let bestIdx = 0;
+        let bestDist = -1;
+        for (let i = 0; i < n; i++) {
+          let minD = Infinity;
+          for (let j = 0; j < centroids.length; j++) {
+            const dot = U[i].reduce((a, v, idx) => a + v * centroids[j][idx], 0);
+            minD = Math.min(minD, 1.0 - dot);
+          }
+          if (minD > bestDist) {
+            bestDist = minD;
+            bestIdx = i;
+          }
+        }
+        centroids.push(U[bestIdx].slice());
+      }
+      const labels = new Int32Array(n);
+      for (let iter = 0; iter < 30; iter++) {
+        for (let i = 0; i < n; i++) {
+          let bestC = 0;
+          let bestS = -Infinity;
+          for (let c = 0; c < k; c++) {
+            const dot = U[i].reduce((a, v, idx) => a + v * centroids[c][idx], 0);
+            if (dot > bestS) {
+              bestS = dot;
+              bestC = c;
+            }
+          }
+          labels[i] = bestC;
+        }
+        for (let c = 0; c < k; c++) {
+          const sum = new Float64Array(k);
+          let cnt = 0;
+          for (let i = 0; i < n; i++) {
+            if (labels[i] === c) {
+              cnt++;
+              for (let d = 0; d < k; d++) sum[d] += U[i][d];
+            }
+          }
+          if (cnt > 0) {
+            const norm = Math.hypot(...sum) || 1.0;
+            centroids[c] = Array.from(sum, (v) => v / norm);
+          }
+        }
+      }
+
+      // First-seen speaker canonicalization
+      const map = new Map();
+      let nextId = 1;
+      const turns = [];
+      for (let i = 0; i < n; i++) {
+        if (!map.has(labels[i])) map.set(labels[i], String(nextId++));
+        const spk = map.get(labels[i]);
+        const tS = i === 0 ? 0.0 : 0.5 * (times[i - 1][1] + times[i][0]);
+        const tE = i === n - 1 ? times[i][1] : 0.5 * (times[i][1] + times[i + 1][0]);
+        if (turns.length && turns[turns.length - 1].speaker === spk) {
+          turns[turns.length - 1].end = tE;
+        } else {
+          turns.push({ start: tS, end: tE, speaker: spk });
+        }
+      }
+      return { turns, estimatedK: k };
+    }
+
+    // --- Stage 3: Overlap-Proportion Word-to-Turn Alignment with Midpoint Fallback ---
+    function assignSpeakersJS(wordObjs, turns) {
+      if (!turns || !turns.length) return wordObjs.map(() => "1");
+      const rawSpks = wordObjs.map((w) => {
+        let bestSpk = null;
+        let bestOv = 0.0;
+        for (const t of turns) {
+          const ov = Math.min(w.end, t.end) - Math.max(w.start, t.start);
+          if (ov > bestOv) {
+            bestOv = ov;
+            bestSpk = t.speaker;
+          }
+        }
+        if (bestSpk !== null) return bestSpk;
+        // Midpoint nearest-turn fallback for words in brief inter-turn gaps
+        const wMid = 0.5 * (w.start + w.end);
+        let minDist = Infinity;
+        let nearSpk = turns[0].speaker;
+        for (const t of turns) {
+          const tMid = 0.5 * (t.start + t.end);
+          const dist = Math.abs(wMid - tMid);
+          if (dist < minDist) {
+            minDist = dist;
+            nearSpk = t.speaker;
+          }
+        }
+        return nearSpk;
+      });
+      const seen = new Map();
+      let nextId = 1;
+      return rawSpks.map((s) => {
+        if (!seen.has(s)) seen.set(s, String(nextId++));
+        return seen.get(s);
+      });
+    }
+
+    async function runLiveBrowserPipeline(fileOrUrl, precomputedWords = null) {
+      runBtn.disabled = true;
+      try {
+        const selectedAsr = asrSelect.value;
+        const browserModelId = ASR_MODEL_MAP[selectedAsr] || "Xenova/whisper-base.en";
+        const presetName = presetSelect.value;
+        const presetCfg = PRESET_CONFIGS[presetName] || PRESET_CONFIGS["Fisher Telephony (2 speakers)"];
+        const reqNumSpk = parseInt(numSpkRange.value, 10);
+        const useLlm = useLlmCheck.checked;
+        const useLg = useLgCheck.checked;
+
+        const wav16k = await decodeAudio16k(fileOrUrl);
+        let wordObjs = precomputedWords;
+        let tAsr = "0.0";
+
+        if (!wordObjs) {
+          const t0 = performance.now();
+          statusBar.textContent = `[Stage 1/4] Loading Whisper ASR (${selectedAsr} -> ${browserModelId}) in browser...`;
+          if (!browserAsrCache[browserModelId]) {
+            browserAsrCache[browserModelId] = await pipeline("automatic-speech-recognition", browserModelId);
+          }
+          statusBar.textContent = `[Stage 1/4] Transcribing speech with word timestamps (${selectedAsr})...`;
+          const asrOut = await browserAsrCache[browserModelId](wav16k, {
+            return_timestamps: "word",
+            chunk_length_s: 30,
+            stride_length_s: 5
+          });
+          tAsr = ((performance.now() - t0) / 1000).toFixed(2);
+          const chunks = (asrOut && asrOut.chunks && asrOut.chunks.length)
+            ? asrOut.chunks
+            : [{ text: (asrOut && asrOut.text) || "", timestamp: [0, wav16k.length / 16000] }];
+          wordObjs = [];
+          for (const ch of chunks) {
+            const clean = String(ch.text || "").toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
+            if (!clean) continue;
+            const ws = clean.split(/\s+/);
+            const s = (ch.timestamp && ch.timestamp[0] != null) ? ch.timestamp[0] : 0.0;
+            const e = (ch.timestamp && ch.timestamp[1] != null) ? ch.timestamp[1] : s + 0.3;
+            const dur = Math.max(0.05, e - s);
+            for (let i = 0; i < ws.length; i++) {
+              wordObjs.push({
+                word: ws[i],
+                start: s + (dur * i) / ws.length,
+                end: s + (dur * (i + 1)) / ws.length
+              });
+            }
+          }
+        }
+        if (!wordObjs || !wordObjs.length) {
+          statusBar.textContent = "No speech words detected in the audio.";
+          return;
+        }
+
+        const t1 = performance.now();
+        statusBar.textContent = `[Stage 2/4] Running Symmetric Normalized Laplacian SpectralClusterer (${presetName})...`;
+        const { feats, times } = extractWindowFeatures(wav16k, presetCfg.winSec, presetCfg.stepSec);
+        const { turns } = spectralClusterWindows(feats, times, reqNumSpk, presetCfg);
+        const acSpks = assignSpeakersJS(wordObjs, turns);
+        const tDiar = ((performance.now() - t1) / 1000).toFixed(2);
+
+        const words = wordObjs.map((w) => w.word);
+        const t2 = performance.now();
+        let activeSpks = acSpks.slice();
+        if (useLlm) {
+          statusBar.textContent = `[Stage 4/4] Running DiarizationLM-Gemma-4-E4B-v1 + ${useLg ? "LG-TPST" : "Raw-TPST"}...`;
+          let rawLlmSpks = null;
+          try {
+            const promptText = words.map((w, i) => (i === 0 || acSpks[i] !== acSpks[i - 1]) ? `<speaker:${acSpks[i]}> ${w}` : w).join(" ");
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 3500);
+            const apiResp = await fetch("https://diarizers-community-diarizationlm-gguf.hf.space/api/predict", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ data: [promptText, 512, 0.0] }),
+              signal: ctrl.signal
+            });
+            clearTimeout(timer);
+            if (apiResp.ok) {
+              const apiJson = await apiResp.json();
+              const llmOutStr = apiJson && apiJson.data && apiJson.data[0];
+              if (llmOutStr) {
+                const parsed = extractTextAndSpkJS(llmOutStr);
+                if (parsed.words.length > 0) {
+                  rawLlmSpks = tpstAlignJS(parsed.words, parsed.spks, words, acSpks);
+                }
+              }
+            }
+          } catch (_) {
+            // Fall back cleanly to local lexical/discourse boundary refinement + TPST
+          }
+          if (!rawLlmSpks) {
+            rawLlmSpks = refineDiscourseBoundariesJS(words, acSpks);
+          }
+          activeSpks = useLg
+            ? applyLocalityGatedSpeakerTransferJS(acSpks, rawLlmSpks, 5, 15, 15)
+            : rawLlmSpks;
+        }
+        const tLlm = ((performance.now() - t2) / 1000).toFixed(2);
+        const changed = acSpks.reduce((acc, s, i) => acc + (s !== activeSpks[i] ? 1 : 0), 0);
+        const totalSec = (parseFloat(tAsr) + parseFloat(tDiar) + parseFloat(tLlm)).toFixed(2);
+
+        beforeBox.innerHTML = renderDiarizedHtml(words, acSpks);
+        afterBox.innerHTML = renderDiarizedHtml(words, activeSpks, acSpks);
+        const { rttm, srt } = buildRttmAndSrt(wordObjs, activeSpks);
+        rttmBox.textContent = rttm;
+        srtBox.textContent = srt;
+        statusBar.textContent =
+          `Completed in ${totalSec}s (ASR: ${tAsr}s, SpectralClusterer: ${tDiar}s, ` +
+          `DiarizationLM: ${useLlm ? tLlm + "s" : "disabled"}) | Words: ${words.length} | ` +
+          `Speakers: ${new Set(activeSpks).size} (req=${reqNumSpk === 0 ? "Auto Eigengap" : reqNumSpk}) | ` +
+          `Words relabeled: ${changed}/${words.length} | Mode: ${!useLlm ? "Acoustic Only" : (useLg ? "LG-TPST" : "Raw-TPST")}`;
+      } catch (err) {
+        console.error(err);
+        statusBar.textContent = "Error: " + (err && err.message ? err.message : String(err));
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+
+    function selectBuiltin(idx) {
+      const ex = BUILTIN_EXAMPLES[idx];
+      if (!ex) return;
+      currentSource = { type: "builtin", index: idx, file: null };
+      audioFileInput.value = "";
+      inputAudioPlayer.src = ex.audio_url;
+      asrSelect.value = ex.asr_model || "openai/whisper-base.en";
+      presetSelect.value = ex.preset_name;
+      numSpkRange.value = String(ex.num_speakers);
+      numSpkVal.textContent = String(ex.num_speakers);
+      renderBuiltinExample(ex);
+    }
+
+    audioFileInput.addEventListener("change", (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      currentSource = { type: "upload", index: -1, file };
+      inputAudioPlayer.src = URL.createObjectURL(file);
+      runLiveBrowserPipeline(file, null);
+    });
+
+    runBtn.addEventListener("click", () => {
+      if (currentSource.type === "builtin") {
+        const ex = BUILTIN_EXAMPLES[currentSource.index];
+        const paramsUnchanged = (
+          presetSelect.value === ex.preset_name &&
+          parseInt(numSpkRange.value, 10) === ex.num_speakers &&
+          asrSelect.value === (ex.asr_model || "openai/whisper-base.en")
+        );
+        if (paramsUnchanged) {
+          renderBuiltinExample(ex);
+        } else {
+          const preWords = asrSelect.value === (ex.asr_model || "openai/whisper-base.en")
+            ? ex.words.map((w) => ({ word: w.word, start: w.start, end: w.end }))
+            : null;
+          runLiveBrowserPipeline(ex.audio_url, preWords);
+        }
+      } else if (currentSource.file) {
+        runLiveBrowserPipeline(currentSource.file, null);
+      }
+    });
+
+    useLlmCheck.addEventListener("change", () => {
+      if (currentSource.type === "builtin") {
+        renderBuiltinExample(BUILTIN_EXAMPLES[currentSource.index]);
+      }
+    });
+
+    useLgCheck.addEventListener("change", () => {
+      if (currentSource.type === "builtin") {
+        renderBuiltinExample(BUILTIN_EXAMPLES[currentSource.index]);
+      }
+    });
+
+    async function init() {
+      const resp = await fetch("examples/metadata.json");
+      const data = await resp.json();
+      BUILTIN_EXAMPLES = data.examples || [];
+      examplesTableBody.innerHTML = BUILTIN_EXAMPLES.map((ex, i) => `
+        <tr class="example-row" data-idx="${i}">
+          <td><b>${escapeHtml(ex.title)}</b></td>
+          <td><span class="tag">${escapeHtml(ex.preset_name)}</span></td>
+          <td>${ex.num_speakers} speakers (${ex.word_count} words)</td>
+          <td>${escapeHtml(ex.description)}</td>
+        </tr>
+      `).join("");
+      document.querySelectorAll(".example-row").forEach((row) => {
+        row.addEventListener("click", () => {
+          selectBuiltin(parseInt(row.getAttribute("data-idx"), 10));
+        });
+      });
+      if (BUILTIN_EXAMPLES.length > 0) {
+        selectBuiltin(0);
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

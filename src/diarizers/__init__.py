@@ -17,6 +17,7 @@ from diarizers.alignment import (
     speakers_transform,
     tpst_align,
     transcript_preserving_speaker_transfer,
+    truncate_completion_suffix,
 )
 from diarizers.asr import (
     AudioCppASR,
@@ -145,5 +146,6 @@ __all__ = [
     "speakers_transform",
     "tpst_align",
     "transcript_preserving_speaker_transfer",
+    "truncate_completion_suffix",
     "turns_to_word_segments",
 ]

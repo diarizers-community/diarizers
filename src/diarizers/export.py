@@ -6,6 +6,30 @@ import subprocess
 from typing import Any, Dict, Optional
 
 
+def _load_causal_or_gemma4_model(
+    model_id_or_path: str,
+    torch_dtype: Any,
+) -> Any:
+  """Loads a CausalLM or Gemma-4 conditional generation model."""
+  import transformers
+
+  try:
+    return transformers.AutoModelForCausalLM.from_pretrained(
+        model_id_or_path, torch_dtype=torch_dtype
+    )
+  except ValueError:
+    cls_cand = getattr(
+        transformers,
+        "Gemma4ForConditionalGeneration",
+        getattr(transformers, "AutoModelForImageTextToText", None),
+    )
+    if cls_cand is None:
+      raise
+    return cls_cand.from_pretrained(
+        model_id_or_path, torch_dtype=torch_dtype
+    )
+
+
 def export_merged_safetensors(
     adapter_or_model_dir: str,
     output_dir: str,
@@ -24,8 +48,8 @@ def export_merged_safetensors(
     base_id = base_model_name_or_path or adapter_cfg.get(
         "base_model_name_or_path"
     )
-    base_model = transformers.AutoModelForCausalLM.from_pretrained(
-        base_id, torch_dtype=torch.bfloat16
+    base_model = _load_causal_or_gemma4_model(
+        str(base_id), torch_dtype=torch.bfloat16
     )
     peft_model = peft.PeftModel.from_pretrained(
         base_model, adapter_or_model_dir
@@ -35,7 +59,7 @@ def export_merged_safetensors(
         adapter_or_model_dir
     )
   else:
-    merged = transformers.AutoModelForCausalLM.from_pretrained(
+    merged = _load_causal_or_gemma4_model(
         adapter_or_model_dir, torch_dtype=torch.bfloat16
     )
     tokenizer = transformers.AutoTokenizer.from_pretrained(

@@ -1,4 +1,4 @@
-"""Package setup for diarizers v1.0.0."""
+"""Package setup for diarizers v1.0.1."""
 
 from setuptools import find_packages
 from setuptools import setup
@@ -25,8 +25,7 @@ EXTRAS_REQUIRE = {
         "datasets>=2.16.0",
     ],
     "audio": [
-        "torchaudio>=2.0.0",
-        "spectralcluster>=0.2.16",
+        "scikit-learn>=1.2.0",
     ],
     "dev": [
         "pytest>=7.0.0",

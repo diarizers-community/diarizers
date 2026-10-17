@@ -695,6 +695,27 @@ class UtteranceChunker:
       seg_idx += 1
 
 
+def truncate_completion_suffix(
+    completion: str,
+    completion_suffix: str = configs.COMPLETION_SUFFIX,
+) -> str:
+  """Truncates completion at the first occurrence of suffix or turn tag."""
+  text = completion.strip()
+  markers: List[str] = []
+  suf = completion_suffix.strip()
+  if suf:
+    markers.append(suf)
+  for m in ("<turn|>", "<|endoftext|>", "<eos>"):
+    if m not in markers:
+      markers.append(m)
+  cut_idx = len(text)
+  for marker in markers:
+    pos = text.find(marker)
+    if pos != -1 and pos < cut_idx:
+      cut_idx = pos
+  return text[:cut_idx].strip()
+
+
 def reconcile_chunk_speakers_hungarian(
     utt_words: Sequence[str],
     utt_hyp_spks: Sequence[str],
@@ -728,9 +749,9 @@ def reconcile_chunk_speakers_hungarian(
     already = max(0, len(reconciled_raw) - s_i)
 
     if idx < len(chunk_completions) and chunk_completions[idx].strip():
-      comp = chunk_completions[idx].strip()
-      if comp.endswith(chunker.completion_suffix.strip()):
-        comp = comp[:-len(chunker.completion_suffix.strip())].strip()
+      comp = truncate_completion_suffix(
+          chunk_completions[idx], chunker.completion_suffix
+      )
       llm_text, llm_spk = extract_text_and_spk(
           comp,
           speaker_prefix=chunker.speaker_prefix,
