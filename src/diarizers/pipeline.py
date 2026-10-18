@@ -1,6 +1,7 @@
 """Unified 4-stage ASR + Diarization + Alignment + DiarizationLM Pipeline."""
 
 from collections.abc import Callable, Sequence
+import dataclasses
 from typing import List, Optional, Tuple, Union
 
 import numpy as np
@@ -32,29 +33,26 @@ class DiarizersPipeline:
     )
     if prompt_config is None:
       if use_locality_gate is not None:
-        prompt_config = configs.PromptConfig(
-            use_locality_gate=use_locality_gate
+        base_cfg = (
+            llm_refiner.prompt_config
+            if llm_refiner is not None
+            else configs.DEFAULT_PROMPT_CONFIG
         )
+        prompt_config = dataclasses.replace(
+            base_cfg, use_locality_gate=use_locality_gate
+        )
+      elif llm_refiner is not None:
+        prompt_config = llm_refiner.prompt_config
       else:
         prompt_config = configs.DEFAULT_PROMPT_CONFIG
     elif use_locality_gate is not None:
-      prompt_config = configs.PromptConfig(
-          speaker_prefix=prompt_config.speaker_prefix,
-          speaker_suffix=prompt_config.speaker_suffix,
-          prompt_prefix=prompt_config.prompt_prefix,
-          prompt_suffix=prompt_config.prompt_suffix,
-          completion_suffix=prompt_config.completion_suffix,
-          emit_input_length=prompt_config.emit_input_length,
-          emit_target_length=prompt_config.emit_target_length,
-          use_gemma_turn_template=prompt_config.use_gemma_turn_template,
-          use_locality_gate=use_locality_gate,
-          max_local_span_words=prompt_config.max_local_span_words,
-          max_two_spk_span_words=prompt_config.max_two_spk_span_words,
-          max_ghost_cluster_words=prompt_config.max_ghost_cluster_words,
-          overlap_words=prompt_config.overlap_words,
+      prompt_config = dataclasses.replace(
+          prompt_config, use_locality_gate=use_locality_gate
       )
     self.llm_refiner = llm_refiner
     self.prompt_config = prompt_config
+    if self.llm_refiner is not None:
+      self.llm_refiner.prompt_config = self.prompt_config
 
   @classmethod
   def from_pretrained(
@@ -138,7 +136,10 @@ class DiarizersPipeline:
       raw_tpst = hyp_spk
       lg_tpst = hyp_spk
 
-    final_spks = lg_tpst.split()
+    active_tpst = (
+        lg_tpst if self.prompt_config.use_locality_gate else raw_tpst
+    )
+    final_spks = active_tpst.split()
     if len(final_spks) != len(words):
       final_spks = acoustic_spks
 

@@ -385,16 +385,16 @@
 
     const PRESET_CONFIGS = {
       "Fisher Telephony (2 speakers)": {
-        winSec: 1.2, stepSec: 0.4, minK: 2, maxK: 2, pPct: 80, sigma: 1.0, eigenThreshold: 0.45
+        winSec: 1.2, stepSec: 0.4, minK: 2, maxK: 2, pPct: 85, sigma: 1.5, eigenThreshold: 0.45
       },
       "Callhome Telephony (2-6 speakers)": {
-        winSec: 1.2, stepSec: 0.4, minK: 2, maxK: 6, pPct: 80, sigma: 1.0, eigenThreshold: 0.45
+        winSec: 1.2, stepSec: 0.4, minK: 2, maxK: 6, pPct: 70, sigma: 1.5, eigenThreshold: 0.45
       },
       "AMI Meeting (3-5 speakers)": {
-        winSec: 1.2, stepSec: 0.4, minK: 3, maxK: 5, pPct: 80, sigma: 1.0, eigenThreshold: 0.45
+        winSec: 2.0, stepSec: 1.0, minK: 3, maxK: 5, pPct: 70, sigma: 1.5, eigenThreshold: 0.45
       },
       "Meeting Multi-Speaker (2-10 speakers)": {
-        winSec: 1.2, stepSec: 0.4, minK: 2, maxK: 10, pPct: 80, sigma: 1.0, eigenThreshold: 0.45
+        winSec: 2.0, stepSec: 1.0, minK: 2, maxK: 10, pPct: 70, sigma: 1.5, eigenThreshold: 0.45
       }
     };
 
@@ -406,6 +406,7 @@
 
     let BUILTIN_EXAMPLES = [];
     let currentSource = { type: "builtin", index: 0, file: null };
+    let lastLiveResult = null;
     const browserAsrCache = {};
 
     numSpkRange.addEventListener("input", () => {
@@ -461,6 +462,87 @@
       return { words, spks };
     }
 
+    function speakersTransformIntJS(spks) {
+      const seen = new Map();
+      let nextId = 1;
+      return spks.map((s) => {
+        const key = String(s);
+        if (!seen.has(key)) seen.set(key, nextId++);
+        return seen.get(key);
+      });
+    }
+
+    function speakersTransformJS(spks) {
+      return speakersTransformIntJS(spks).map((x) => String(x));
+    }
+
+    // Exact Hungarian (Kuhn-Munkres) speaker permutation alignment (matches alignment.get_oracle_speakers)
+    function getOracleSpeakersJS(hypSpk, hypAlign, refAlign) {
+      if (!hypSpk.length || !hypAlign.length || !refAlign.length) return hypSpk.slice();
+      let maxSpk = 1;
+      for (const s of hypSpk) if (s > maxSpk) maxSpk = s;
+      for (const s of hypAlign) if (s > maxSpk) maxSpk = s;
+      for (const s of refAlign) if (s > maxSpk) maxSpk = s;
+
+      const cost = Array.from({ length: maxSpk + 1 }, () => new Float64Array(maxSpk + 1));
+      const len = Math.min(hypAlign.length, refAlign.length);
+      for (let idx = 0; idx < len; idx++) {
+        const hs = hypAlign[idx];
+        const rs = refAlign[idx];
+        if (hs >= 1 && hs <= maxSpk && rs >= 1 && rs <= maxSpk) {
+          cost[hs][rs] -= 1.0;
+        }
+      }
+      const u = new Float64Array(maxSpk + 1);
+      const v = new Float64Array(maxSpk + 1);
+      const p = new Int32Array(maxSpk + 1);
+      const way = new Int32Array(maxSpk + 1);
+      for (let i = 1; i <= maxSpk; i++) {
+        p[0] = i;
+        let j0 = 0;
+        const minv = new Float64Array(maxSpk + 1).fill(Infinity);
+        const used = new Uint8Array(maxSpk + 1);
+        do {
+          used[j0] = 1;
+          const i0 = p[j0];
+          let delta = Infinity;
+          let j1 = 0;
+          for (let j = 1; j <= maxSpk; j++) {
+            if (!used[j]) {
+              const cur = cost[i0][j] - u[i0] - v[j];
+              if (cur < minv[j]) {
+                minv[j] = cur;
+                way[j] = j0;
+              }
+              if (minv[j] < delta) {
+                delta = minv[j];
+                j1 = j;
+              }
+            }
+          }
+          for (let j = 0; j <= maxSpk; j++) {
+            if (used[j]) {
+              u[p[j]] += delta;
+              v[j] -= delta;
+            } else {
+              minv[j] -= delta;
+            }
+          }
+          j0 = j1;
+        } while (p[j0] !== 0);
+        do {
+          const j1 = way[j0];
+          p[j0] = p[j1];
+          j0 = j1;
+        } while (j0 !== 0);
+      }
+      const mapping = new Map();
+      for (let j = 1; j <= maxSpk; j++) {
+        if (p[j] > 0) mapping.set(p[j], j);
+      }
+      return hypSpk.map((s) => mapping.get(s) || s);
+    }
+
     function tpstAlignJS(srcWords, srcSpks, tgtWords, tgtSpks) {
       const n = srcWords.length;
       const m = tgtWords.length;
@@ -479,18 +561,53 @@
           );
         }
       }
-      const transferred = tgtSpks.slice();
+      const align = [];
       let i = n, j = m;
-      while (i > 0 && j > 0) {
-        const cost = srcWords[i - 1] === tgtWords[j - 1] ? 0 : 1;
-        if (dp[i][j] === dp[i - 1][j - 1] + cost) {
-          transferred[j - 1] = srcSpks[i - 1];
-          i--; j--;
-        } else if (dp[i][j] === dp[i][j - 1] + 1) {
-          transferred[j - 1] = srcSpks[Math.min(i, n - 1)];
+      while (i > 0 || j > 0) {
+        if (i > 0 && j > 0) {
+          const cost = srcWords[i - 1] === tgtWords[j - 1] ? 0 : 1;
+          if (dp[i][j] === dp[i - 1][j - 1] + cost) {
+            align.push([j - 1, i - 1]);
+            i--; j--;
+            continue;
+          }
+        }
+        if (j > 0 && (i === 0 || dp[i][j] === dp[i][j - 1] + 1)) {
+          align.push([j - 1, -1]);
           j--;
         } else {
+          align.push([-1, i - 1]);
           i--;
+        }
+      }
+      align.reverse();
+
+      const srcInt = srcSpks.map((s) => parseInt(s, 10) || 1);
+      const tgtInt = tgtSpks.map((s) => parseInt(s, 10) || 1);
+      const matchedSrc = [];
+      const matchedTgt = [];
+      for (const [tIdx, sIdx] of align) {
+        if (tIdx !== -1 && sIdx !== -1 && tIdx < tgtInt.length && sIdx < srcInt.length) {
+          matchedSrc.push(srcInt[sIdx]);
+          matchedTgt.push(tgtInt[tIdx]);
+        }
+      }
+      const mappedSrc = (matchedSrc.length && matchedTgt.length)
+        ? getOracleSpeakersJS(srcInt, matchedSrc, matchedTgt).map((x) => String(x))
+        : srcSpks.map((x) => String(x));
+
+      const transferred = tgtSpks.map((x) => String(x));
+      let lastValidSpk = mappedSrc[0] || "1";
+      for (const [tIdx, sIdx] of align) {
+        if (sIdx !== -1 && sIdx < mappedSrc.length) {
+          lastValidSpk = mappedSrc[sIdx];
+        }
+        if (tIdx !== -1 && tIdx < transferred.length) {
+          if (sIdx !== -1 && sIdx < mappedSrc.length) {
+            transferred[tIdx] = mappedSrc[sIdx];
+          } else {
+            transferred[tIdx] = tgtSpks[tIdx] ? String(tgtSpks[tIdx]) : lastValidSpk;
+          }
         }
       }
       return transferred;
@@ -505,108 +622,131 @@
     ) {
       const n = hypSpks.length;
       if (n === 0 || llmSpks.length !== n) return hypSpks.slice();
-      const counts = new Map();
-      for (const s of hypSpks) counts.set(s, (counts.get(s) || 0) + 1);
-      const validSpks = new Set();
-      for (const [s, c] of counts.entries()) {
-        if (c > maxGhostClusterWords) validSpks.add(s);
+
+      const hypInt = speakersTransformIntJS(hypSpks);
+      const llmRawInt = speakersTransformIntJS(llmSpks);
+      const alignedLlmInt = getOracleSpeakersJS(llmRawInt, llmRawInt, hypInt);
+
+      const spkCounts = new Map();
+      for (const s of hypInt) spkCounts.set(s, (spkCounts.get(s) || 0) + 1);
+      const numSpks = spkCounts.size;
+      const minMajor = Math.max(5, Math.floor(n * 0.005));
+      const ghostThresh = numSpks >= 3
+        ? Math.min(maxGhostClusterWords, Math.max(2, Math.floor(n * 0.01)))
+        : 0;
+
+      let majorSpks = new Set();
+      for (const [s, c] of spkCounts.entries()) {
+        if (c >= minMajor && c > ghostThresh) majorSpks.add(s);
       }
-      if (validSpks.size === 0 && counts.size > 0) {
-        let bestS = hypSpks[0], bestC = -1;
-        for (const [s, c] of counts.entries()) {
-          if (c > bestC) { bestC = c; bestS = s; }
-        }
-        validSpks.add(bestS);
-      }
-      const cleanedHyp = hypSpks.slice();
-      for (let idx = 0; idx < n; idx++) {
-        if (!validSpks.has(cleanedHyp[idx])) {
-          let replacement = null;
-          for (let step = 1; step < n; step++) {
-            if (idx - step >= 0 && validSpks.has(cleanedHyp[idx - step])) {
-              replacement = cleanedHyp[idx - step];
-              break;
-            }
-            if (idx + step < n && validSpks.has(cleanedHyp[idx + step])) {
-              replacement = cleanedHyp[idx + step];
-              break;
-            }
-          }
-          if (replacement) cleanedHyp[idx] = replacement;
+      if (majorSpks.size === 0) {
+        for (const [s, c] of spkCounts.entries()) {
+          if (c > ghostThresh) majorSpks.add(s);
         }
       }
-      const effSpan = validSpks.size <= 2
-        ? Math.max(maxLocalSpanWords, maxTwoSpkSpanWords)
-        : maxLocalSpanWords;
-      const out = cleanedHyp.slice();
+      const ghostSpks = new Set();
+      for (const [s, c] of spkCounts.entries()) {
+        if (c <= ghostThresh) ghostSpks.add(s);
+      }
+
+      // Step 1: Gate contiguous modification spans (5 words for >=3 spks, 15 for 2)
+      const spanLimit = numSpks >= 3
+        ? maxLocalSpanWords
+        : Math.max(maxLocalSpanWords, maxTwoSpkSpanWords);
+      const resultInt = hypInt.slice();
       let i = 0;
       while (i < n) {
-        if (llmSpks[i] === cleanedHyp[i]) { i++; continue; }
+        if (alignedLlmInt[i] === hypInt[i]) { i++; continue; }
         let j = i;
-        while (j < n && llmSpks[j] !== cleanedHyp[j]) j++;
+        while (j < n && alignedLlmInt[j] !== hypInt[j]) j++;
         const spanLen = j - i;
-        if (spanLen <= effSpan) {
-          let touchesBoundary = (i === 0 || j === n);
-          if (!touchesBoundary) {
-            const winL = Math.max(0, i - 3);
-            const winR = Math.min(n - 1, j + 2);
-            for (let k = winL; k < winR; k++) {
-              if (cleanedHyp[k] !== cleanedHyp[k + 1]) {
-                touchesBoundary = true;
-                break;
-              }
-            }
-          }
-          if (touchesBoundary) {
-            for (let k = i; k < j; k++) {
-              if (validSpks.has(llmSpks[k])) out[k] = llmSpks[k];
+        if (spanLen <= spanLimit) {
+          for (let k = i; k < j; k++) {
+            if (numSpks <= 2 || majorSpks.size === 0 || majorSpks.has(alignedLlmInt[k])) {
+              resultInt[k] = alignedLlmInt[k];
             }
           }
         }
         i = j;
       }
-      // First-seen canonicalization
-      const seen = new Map();
-      let nextId = 1;
-      return out.map((s) => {
-        if (!seen.has(s)) seen.set(s, String(nextId++));
-        return seen.get(s);
-      });
+
+      // Step 2: Absorb tiny ghost speaker clusters in >=3 speaker conversations
+      if (ghostSpks.size > 0 && numSpks >= 3 && majorSpks.size >= 2) {
+        for (let idx = 0; idx < n; idx++) {
+          if (ghostSpks.has(resultInt[idx])) {
+            if (majorSpks.has(alignedLlmInt[idx])) {
+              resultInt[idx] = alignedLlmInt[idx];
+            } else {
+              for (let offset = 1; offset < n; offset++) {
+                if (idx - offset >= 0 && majorSpks.has(resultInt[idx - offset])) {
+                  resultInt[idx] = resultInt[idx - offset];
+                  break;
+                }
+                if (idx + offset < n && majorSpks.has(resultInt[idx + offset])) {
+                  resultInt[idx] = resultInt[idx + offset];
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      return speakersTransformJS(resultInt);
     }
 
-    // Discourse & Lexical Boundary Refinement (Stage 4 Browser Engine)
+    // Discourse & Lexical Boundary Refinement (Stage 4 Browser Fallback Engine)
     function refineDiscourseBoundariesJS(words, acSpks) {
       const n = words.length;
       if (n <= 1) return acSpks.slice();
       const rawLlm = acSpks.slice();
       const turnStarters = new Set([
-        "hi", "hello", "hey", "sure", "yes", "yeah", "okay", "ok", "oh", "well", "wonderful", "great", "that", "thanks"
+        "hi", "hello", "hey", "sure", "yes", "yeah", "yep", "no", "nope",
+        "okay", "ok", "oh", "well", "wonderful", "great", "that", "thanks",
+        "thank", "right", "exact", "exactly", "actually", "honestly", "wait",
+        "listen", "look", "good", "nice"
+      ]);
+      const turnPronounsAndQuestions = new Set([
+        "i", "im", "ive", "id", "ill", "we", "were", "weve", "what", "whats",
+        "where", "when", "why", "how", "who", "can", "could", "would", "should"
       ]);
       const phraseContinuers = new Set([
-        "meeting", "model", "pipeline", "results", "together", "benchmarks", "located", "francisco", "tennessee", "california"
+        "meeting", "model", "models", "pipeline", "results", "together",
+        "benchmarks", "located", "francisco", "tennessee", "california",
+        "today", "now", "here", "there", "please", "too", "well", "much",
+        "more", "most", "time", "times", "way", "thing", "things", "work",
+        "working", "going", "doing", "done", "morning", "afternoon", "evening",
+        "night", "week", "month", "year", "call", "talk", "talking", "point",
+        "question", "idea", "team", "system", "data", "audio", "speaker",
+        "speakers"
       ]);
       const determinersAndPreps = new Set([
-        "the", "a", "an", "our", "my", "your", "all", "four", "two", "three", "on", "in", "to", "for", "of", "are", "you", "speech", "recognition", "project"
+        "the", "a", "an", "our", "my", "your", "their", "his", "her", "its",
+        "this", "these", "those", "all", "both", "two", "three", "four", "five",
+        "on", "in", "to", "for", "of", "with", "at", "by", "from", "into",
+        "about", "as", "is", "are", "was", "were", "be", "been", "have", "has",
+        "had", "will", "would", "can", "could", "should", "may", "might",
+        "must", "very", "really", "so", "too", "quite", "new", "open", "full",
+        "next", "last", "first", "second", "you", "speech", "recognition",
+        "project"
       ]);
 
       for (let i = 1; i < n; i++) {
         if (rawLlm[i] !== rawLlm[i - 1]) {
-          // Case A: Turn-initial discourse marker ("oh", "yes", "hi", "sure") stranded at end of previous speaker's turn
           if (turnStarters.has(words[i - 1]) && i >= 2 && rawLlm[i - 2] === rawLlm[i - 1]) {
             rawLlm[i - 1] = rawLlm[i];
           }
-          // Case B: Noun/verb phrase completion ("meeting", "model", "located", "four benchmarks") spilled into next speaker's turn
           if (
             (phraseContinuers.has(words[i]) || determinersAndPreps.has(words[i - 1])) &&
             i + 1 < n &&
-            (turnStarters.has(words[i + 1]) || words[i + 1] === "i" || words[i + 1] === "im")
+            (turnStarters.has(words[i + 1]) || turnPronounsAndQuestions.has(words[i + 1]))
           ) {
             rawLlm[i] = rawLlm[i - 1];
           } else if (
             i + 2 < n &&
             determinersAndPreps.has(words[i - 1]) &&
             phraseContinuers.has(words[i + 1]) &&
-            turnStarters.has(words[i + 2])
+            (turnStarters.has(words[i + 2]) || turnPronounsAndQuestions.has(words[i + 2]))
           ) {
             rawLlm[i] = rawLlm[i - 1];
             rawLlm[i + 1] = rawLlm[i - 1];
@@ -825,28 +965,74 @@
       return bestK;
     }
 
+    function gaussianBlur2D(mat, sigma) {
+      const n = mat.length;
+      if (n <= 1 || !sigma || sigma <= 0) return mat;
+      const radius = Math.max(1, Math.ceil(3.0 * sigma));
+      const kernel = new Float64Array(2 * radius + 1);
+      let kSum = 0.0;
+      for (let d = -radius; d <= radius; d++) {
+        const w = Math.exp(-(d * d) / (2.0 * sigma * sigma));
+        kernel[d + radius] = w;
+        kSum += w;
+      }
+      for (let i = 0; i < kernel.length; i++) kernel[i] /= kSum;
+      const tmp = Array.from({ length: n }, () => new Float64Array(n));
+      for (let r = 0; r < n; r++) {
+        for (let c = 0; c < n; c++) {
+          let acc = 0.0;
+          for (let d = -radius; d <= radius; d++) {
+            const cc = Math.min(n - 1, Math.max(0, c + d));
+            acc += mat[r][cc] * kernel[d + radius];
+          }
+          tmp[r][c] = acc;
+        }
+      }
+      const out = Array.from({ length: n }, () => new Float64Array(n));
+      for (let r = 0; r < n; r++) {
+        for (let c = 0; c < n; c++) {
+          let acc = 0.0;
+          for (let d = -radius; d <= radius; d++) {
+            const rr = Math.min(n - 1, Math.max(0, r + d));
+            acc += tmp[rr][c] * kernel[d + radius];
+          }
+          out[r][c] = acc;
+        }
+      }
+      return out;
+    }
+
     // --- Symmetric Normalized Laplacian SpectralClusterer (matches diarizers/spectral.py) ---
     function spectralClusterWindows(feats, times, numSpk, presetCfg) {
       const n = feats.length;
       if (n === 0) return { turns: [], estimatedK: 0 };
       if (n === 1) return { turns: [{ start: times[0][0], end: times[0][1], speaker: "1" }], estimatedK: 1 };
 
-      // 1. Cosine affinity matrix A in [0, 1] with zero diagonal
-      const A = Array.from({ length: n }, () => new Float64Array(n));
+      // 1. Cosine affinity matrix A in [0, 1] with row-max diagonal before Gaussian smoothing
+      let A = Array.from({ length: n }, () => new Float64Array(n));
       for (let i = 0; i < n; i++) {
+        let rowMax = 0.0;
         for (let j = 0; j < n; j++) {
           if (i === j) continue;
           let dot = 0.0;
           for (let d = 0; d < feats[i].length; d++) dot += feats[i][d] * feats[j][d];
-          A[i][j] = Math.max(0.0, 0.5 * (1.0 + dot));
+          const val = Math.max(0.0, 0.5 * (1.0 + dot));
+          A[i][j] = val;
+          if (val > rowMax) rowMax = val;
         }
+        A[i][i] = rowMax;
       }
 
-      // 2. Row-wise p-percentile soft-thresholding + symmetrization W = 0.5 * (A + A^T)
-      const pPct = (presetCfg && presetCfg.pPct) || 80;
+      // 2. 2D Gaussian temporal smoothing + row-wise p-percentile soft-thresholding + symmetrization
+      const sigma = (presetCfg && presetCfg.sigma != null) ? presetCfg.sigma : 1.5;
+      if (sigma > 0) {
+        A = gaussianBlur2D(A, sigma);
+      }
+      const pPct = (presetCfg && presetCfg.pPct) || 70;
+      const effP = n < 100 ? Math.min(pPct, 70) : pPct;
       for (let i = 0; i < n; i++) {
         const sortedRow = Array.from(A[i]).sort((a, b) => a - b);
-        const thresh = sortedRow[Math.min(n - 1, Math.floor((pPct / 100.0) * n))];
+        const thresh = sortedRow[Math.min(n - 1, Math.floor((effP / 100.0) * n))];
         for (let j = 0; j < n; j++) {
           if (A[i][j] < thresh) A[i][j] *= 0.01;
         }
@@ -988,6 +1174,85 @@
       });
     }
 
+    async function queryRemoteDiarizationLM(promptText, timeoutMs = 15000) {
+      const baseUrl = "https://diarizers-community-diarizationlm-gguf.hf.space";
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        for (const callPath of ["/gradio_api/call/predict", "/call/predict"]) {
+          const postResp = await fetch(`${baseUrl}${callPath}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ data: [promptText] }),
+            signal: ctrl.signal
+          });
+          if (!postResp.ok) continue;
+          const postJson = await postResp.json();
+          const eventId = postJson && postJson.event_id;
+          if (!eventId) continue;
+
+          const sseResp = await fetch(`${baseUrl}${callPath}/${eventId}`, {
+            method: "GET",
+            signal: ctrl.signal
+          });
+          if (!sseResp.ok) continue;
+          const sseText = await sseResp.text();
+          let lastDataStr = null;
+          for (const line of sseText.split("\n")) {
+            if (line.startsWith("data:")) {
+              const payload = line.slice(5).trim();
+              if (!payload || payload === "null") continue;
+              try {
+                const arr = JSON.parse(payload);
+                if (Array.isArray(arr) && typeof arr[0] === "string" && arr[0].trim()) {
+                  lastDataStr = arr[0];
+                }
+              } catch (_) {}
+            }
+          }
+          if (lastDataStr) return lastDataStr;
+        }
+        const legacyResp = await fetch(`${baseUrl}/api/predict`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ data: [promptText] }),
+          signal: ctrl.signal
+        });
+        if (legacyResp.ok) {
+          const legacyJson = await legacyResp.json();
+          if (legacyJson && legacyJson.data && typeof legacyJson.data[0] === "string") {
+            return legacyJson.data[0];
+          }
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+      return null;
+    }
+
+    function renderLiveResult(res) {
+      if (!res) return;
+      const useLlm = useLlmCheck.checked;
+      const useLg = useLgCheck.checked;
+      const { wordObjs, words, acSpks, rawLlmSpks, tAsr, tDiar, tLlm, reqNumSpk } = res;
+      const lgSpks = applyLocalityGatedSpeakerTransferJS(acSpks, rawLlmSpks, 5, 15, 15);
+      const activeSpks = !useLlm ? acSpks : (useLg ? lgSpks : rawLlmSpks);
+      const changed = acSpks.reduce((acc, s, i) => acc + (s !== activeSpks[i] ? 1 : 0), 0);
+      const effLlmSec = useLlm ? parseFloat(tLlm) : 0.0;
+      const totalSec = (parseFloat(tAsr) + parseFloat(tDiar) + effLlmSec).toFixed(2);
+
+      beforeBox.innerHTML = renderDiarizedHtml(words, acSpks);
+      afterBox.innerHTML = renderDiarizedHtml(words, activeSpks, acSpks);
+      const { rttm, srt } = buildRttmAndSrt(wordObjs, activeSpks);
+      rttmBox.textContent = rttm;
+      srtBox.textContent = srt;
+      statusBar.textContent =
+        `Completed in ${totalSec}s (ASR: ${tAsr}s, SpectralClusterer: ${tDiar}s, ` +
+        `DiarizationLM: ${useLlm ? tLlm + "s" : "disabled"}) | Words: ${words.length} | ` +
+        `Speakers: ${new Set(activeSpks).size} (req=${reqNumSpk === 0 ? "Auto Eigengap" : reqNumSpk}) | ` +
+        `Words relabeled: ${changed}/${words.length} | Mode: ${!useLlm ? "Acoustic Only" : (useLg ? "LG-TPST" : "Raw-TPST")}`;
+    }
+
     async function runLiveBrowserPipeline(fileOrUrl, precomputedWords = null) {
       runBtn.disabled = true;
       try {
@@ -1050,55 +1315,38 @@
 
         const words = wordObjs.map((w) => w.word);
         const t2 = performance.now();
-        let activeSpks = acSpks.slice();
+        let rawLlmSpks = null;
         if (useLlm) {
           statusBar.textContent = `[Stage 4/4] Running DiarizationLM-Gemma-4-E4B-v1 + ${useLg ? "LG-TPST" : "Raw-TPST"}...`;
-          let rawLlmSpks = null;
           try {
             const promptText = words.map((w, i) => (i === 0 || acSpks[i] !== acSpks[i - 1]) ? `<speaker:${acSpks[i]}> ${w}` : w).join(" ");
-            const ctrl = new AbortController();
-            const timer = setTimeout(() => ctrl.abort(), 3500);
-            const apiResp = await fetch("https://diarizers-community-diarizationlm-gguf.hf.space/api/predict", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ data: [promptText, 512, 0.0] }),
-              signal: ctrl.signal
-            });
-            clearTimeout(timer);
-            if (apiResp.ok) {
-              const apiJson = await apiResp.json();
-              const llmOutStr = apiJson && apiJson.data && apiJson.data[0];
-              if (llmOutStr) {
-                const parsed = extractTextAndSpkJS(llmOutStr);
-                if (parsed.words.length > 0) {
-                  rawLlmSpks = tpstAlignJS(parsed.words, parsed.spks, words, acSpks);
-                }
+            const llmOutStr = await queryRemoteDiarizationLM(promptText, 15000);
+            if (llmOutStr) {
+              const parsed = extractTextAndSpkJS(llmOutStr);
+              if (parsed.words.length > 0) {
+                rawLlmSpks = tpstAlignJS(parsed.words, parsed.spks, words, acSpks);
               }
             }
           } catch (_) {
             // Fall back cleanly to local lexical/discourse boundary refinement + TPST
           }
-          if (!rawLlmSpks) {
-            rawLlmSpks = refineDiscourseBoundariesJS(words, acSpks);
-          }
-          activeSpks = useLg
-            ? applyLocalityGatedSpeakerTransferJS(acSpks, rawLlmSpks, 5, 15, 15)
-            : rawLlmSpks;
+        }
+        if (!rawLlmSpks) {
+          rawLlmSpks = refineDiscourseBoundariesJS(words, acSpks);
         }
         const tLlm = ((performance.now() - t2) / 1000).toFixed(2);
-        const changed = acSpks.reduce((acc, s, i) => acc + (s !== activeSpks[i] ? 1 : 0), 0);
-        const totalSec = (parseFloat(tAsr) + parseFloat(tDiar) + parseFloat(tLlm)).toFixed(2);
 
-        beforeBox.innerHTML = renderDiarizedHtml(words, acSpks);
-        afterBox.innerHTML = renderDiarizedHtml(words, activeSpks, acSpks);
-        const { rttm, srt } = buildRttmAndSrt(wordObjs, activeSpks);
-        rttmBox.textContent = rttm;
-        srtBox.textContent = srt;
-        statusBar.textContent =
-          `Completed in ${totalSec}s (ASR: ${tAsr}s, SpectralClusterer: ${tDiar}s, ` +
-          `DiarizationLM: ${useLlm ? tLlm + "s" : "disabled"}) | Words: ${words.length} | ` +
-          `Speakers: ${new Set(activeSpks).size} (req=${reqNumSpk === 0 ? "Auto Eigengap" : reqNumSpk}) | ` +
-          `Words relabeled: ${changed}/${words.length} | Mode: ${!useLlm ? "Acoustic Only" : (useLg ? "LG-TPST" : "Raw-TPST")}`;
+        lastLiveResult = {
+          wordObjs,
+          words,
+          acSpks,
+          rawLlmSpks,
+          tAsr,
+          tDiar,
+          tLlm,
+          reqNumSpk
+        };
+        renderLiveResult(lastLiveResult);
       } catch (err) {
         console.error(err);
         statusBar.textContent = "Error: " + (err && err.message ? err.message : String(err));
@@ -1111,6 +1359,7 @@
       const ex = BUILTIN_EXAMPLES[idx];
       if (!ex) return;
       currentSource = { type: "builtin", index: idx, file: null };
+      lastLiveResult = null;
       audioFileInput.value = "";
       inputAudioPlayer.src = ex.audio_url;
       asrSelect.value = ex.asr_model || "openai/whisper-base.en";
@@ -1137,6 +1386,7 @@
           asrSelect.value === (ex.asr_model || "openai/whisper-base.en")
         );
         if (paramsUnchanged) {
+          lastLiveResult = null;
           renderBuiltinExample(ex);
         } else {
           const preWords = asrSelect.value === (ex.asr_model || "openai/whisper-base.en")
@@ -1150,13 +1400,17 @@
     });
 
     useLlmCheck.addEventListener("change", () => {
-      if (currentSource.type === "builtin") {
+      if (lastLiveResult) {
+        renderLiveResult(lastLiveResult);
+      } else if (currentSource.type === "builtin") {
         renderBuiltinExample(BUILTIN_EXAMPLES[currentSource.index]);
       }
     });
 
     useLgCheck.addEventListener("change", () => {
-      if (currentSource.type === "builtin") {
+      if (lastLiveResult) {
+        renderLiveResult(lastLiveResult);
+      } else if (currentSource.type === "builtin") {
         renderBuiltinExample(BUILTIN_EXAMPLES[currentSource.index]);
       }
     });

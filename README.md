@@ -153,8 +153,8 @@ To separate the contribution of (a) the repaired Stage 1–3 acoustic frontend (
 | **2. Stage 3 + Ghost-Cluster Absorption (`<= 15` words)** | 4.35 / 24.78 | 9.42 / 32.42 | 23.48 / 48.97 | 20.68 / 46.07 |
 | **3. Stage 4 `DiarizationLM-Gemma-4-E4B-v1` (`Raw-TPST`)** | 2.65 / 21.99 | **4.89 / 25.91** | 23.11 / 48.63 | **20.13 / 45.53** |
 | **4. Stage 4 `DiarizationLM-Gemma-4-E4B-v1` (`LG-TPST`)** | **2.59 / 21.91** | 5.98 / 27.69 | **23.10 / 48.62** | 20.14 / 45.56 |
-| **5. Continual Mixed-Frontend SFT (`DiarizationLM-diarizers-Gemma-4-E4B-v1`, `LG-TPST`)** | 2.61 / 21.93 | 5.98 / 27.70 *(Raw: 4.89 / 25.92)* | 23.12 / 48.63 | 20.32 / 45.71 *(Raw: 20.30 / 45.69)* |
-| **Hungarian TPST Oracle Ceiling (`hyp_spk_oracle`)** | *0.00 / 20.46* | *0.00 / 21.08* | *0.00 / 34.97* | *0.00 / 28.70* |
+| **5. Continual Mixed-Frontend SFT (`DiarizationLM-diarizers-Gemma-4-E4B-v1`, `LG-TPST`)** | 2.61 / 21.93 *(Raw: 2.64 / 21.93)* | 5.98 / 27.75 *(Raw: 4.89 / 25.96)* | 23.12 / 48.66 *(Raw: 23.12 / 48.65)* | 20.32 / 45.66 *(Raw: 20.30 / 45.64)* |
+| **Hungarian TPST Oracle Ceiling (`hyp_spk_oracle`)** | *0.01 / 20.46* | *0.00 / 21.08* | *0.00 / 34.97* | *0.00 / 28.70* |
 
 #### 2. Justification for Reusing `diarizers-community/DiarizationLM-Gemma-4-E4B-v1` (No Duplicate Model Release)
 

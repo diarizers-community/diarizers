@@ -504,7 +504,7 @@ def apply_locality_gated_speaker_transfer(
               result_int[idx] = result_int[idx + offset]
               break
 
-  return [str(x) for x in result_int]
+  return speakers_transform(result_int)
 
 
 def locality_gated_speaker_transfer(

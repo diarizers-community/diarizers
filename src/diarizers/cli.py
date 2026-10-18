@@ -96,6 +96,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> None:
 
 
 def _cmd_infer(args: argparse.Namespace) -> None:
+  use_lg = not getattr(args, "no_locality_gate", False)
   if args.input_json:
     with open(args.input_json, "r", encoding="utf-8") as f:
       data = json.load(f)
@@ -103,6 +104,7 @@ def _cmd_infer(args: argparse.Namespace) -> None:
         model_path_or_repo=args.llm_model,
         gguf_filename=args.gguf_file,
         backend=args.llm_backend,
+        prompt_config=configs.PromptConfig(use_locality_gate=use_lg),
         device=args.device,
     )
     refined = refiner.refine_json_dict(data)
@@ -128,6 +130,7 @@ def _cmd_infer(args: argparse.Namespace) -> None:
       llm_gguf_filename=args.gguf_file,
       llm_backend=args.llm_backend,
       device=args.device,
+      use_locality_gate=use_lg,
   )
   transcript = pipe(args.audio, num_speakers=args.num_speakers)
   print(transcript.to_text(use_llm_speaker=True))
@@ -394,6 +397,13 @@ def main(argv: Optional[List[str]] = None) -> None:
         dest="num_speakers",
         type=int,
         default=None,
+    )
+    p_inf.add_argument(
+        "--no_locality_gate",
+        "--no-locality-gate",
+        dest="no_locality_gate",
+        action="store_true",
+        help="Disable LG-TPST locality gate and use Raw-TPST",
     )
     p_inf.add_argument("--device", default="cpu")
     p_inf.set_defaults(func=_cmd_infer)

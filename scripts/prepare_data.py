@@ -29,6 +29,18 @@ def main() -> None:
       "--seed", type=int, default=42, help="Random seed."
   )
   parser.add_argument(
+      "--flavor",
+      default="both",
+      choices=["both", "hyp2ora", "deg2ref"],
+      help="SFT training prompt flavor.",
+  )
+  parser.add_argument(
+      "--max_chunk_chars",
+      type=int,
+      default=4000,
+      help="Maximum prompt chunk length in characters.",
+  )
+  parser.add_argument(
       "--no_locality_oracle",
       action="store_true",
       help="Disable Locality-Preserving Oracle filtering.",
@@ -54,8 +66,10 @@ def main() -> None:
     raw = json.load(f)
   sft_rows = dataprep.build_sft_dataset(
       raw.get("utterances", []),
-      include_deg2ref=True,
+      include_deg2ref=args.flavor in ("both", "deg2ref"),
       use_locality_oracle=not args.no_locality_oracle,
+      max_chunk_chars=args.max_chunk_chars,
+      flavor=args.flavor,
   )
   with open(args.output_json, "w", encoding="utf-8") as f:
     json.dump(sft_rows, f, indent=2, ensure_ascii=False)

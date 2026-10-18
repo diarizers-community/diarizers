@@ -188,9 +188,10 @@ def run_audio_pipeline(
     )
     return
 
+  mode_str = "LG-TPST" if use_lg_tpst else "Raw-TPST"
   yield (
       f"[Stage 3/3] Acoustic frontend finished in {t_asr + t_diar:.1f}s. "
-      f"Running {DEFAULT_GGUF_REPO} (Q4_K_M GGUF) + LG-TPST...",
+      f"Running {DEFAULT_GGUF_REPO} (Q4_K_M GGUF) + {mode_str}...",
       before_llm_text,
       "Running DiarizationLM-Gemma-4-E4B-v1 on CPU...",
       dt_pre.to_rttm(),
@@ -234,7 +235,8 @@ def run_audio_pipeline(
       f"Completed in {total_t:.1f}s (ASR: {t_asr:.1f}s, "
       f"Diarization: {t_diar:.1f}s, DiarizationLM: {t_llm:.1f}s) | "
       f"Words: {len(word_segments)} | Speakers: {len(set(final_spks))} | "
-      f"Words relabeled by DiarizationLM: {changed}/{len(word_segments)}"
+      f"Words relabeled by DiarizationLM: {changed}/{len(word_segments)} | "
+      f"Mode: {mode_str}"
   )
   yield (
       status,

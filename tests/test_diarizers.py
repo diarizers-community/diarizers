@@ -1125,6 +1125,224 @@ class TestASRrefinerPipelineAndEval(unittest.TestCase):
         ])
         self.assertTrue(m_exp.called)
 
+  def test_round2_review_fixes(self) -> None:
+    import diarizers
+    from diarizers import train
+    from unittest import mock
+
+    # 1. [P0-1 / Minor-1] Contiguous speaker re-indexing after ghost absorption
+    # Speaker "2" has only 1 word in a 3-speaker recording of 41 words
+    hyp_spks = ["1"] * 20 + ["2"] + ["3"] * 20
+    llm_spks = ["1"] * 21 + ["3"] * 20
+    gated = alignment.apply_locality_gated_speaker_transfer(
+        hyp_spks, llm_spks, max_ghost_cluster_words=15
+    )
+    self.assertEqual(set(gated), {"1", "2"})
+    self.assertEqual(gated[:21], ["1"] * 21)
+    self.assertEqual(gated[21:], ["2"] * 20)
+
+    # 2. [P0-4] DiarizersPipeline propagates use_locality_gate=False (Raw-TPST)
+    words = [
+        types.WordSegment(word=f"w{i}", start=float(i), end=float(i + 1))
+        for i in range(30)
+    ]
+    turns = [
+        types.SpeakerTurn(start=0.0, end=10.0, speaker="1"),
+        types.SpeakerTurn(start=10.0, end=20.0, speaker="2"),
+        types.SpeakerTurn(start=20.0, end=30.0, speaker="3"),
+    ]
+    # LLM relabels a 7-word span (indices 10..16, > max_local_span_words=5)
+    llm_out_spks = ["1"] * 17 + ["2"] * 3 + ["3"] * 10
+    llm_completion = alignment.create_diarized_text(
+        [w.word for w in words], llm_out_spks
+    )
+    refiner_for_raw = llm.DiarizationLMRefiner(
+        completion_fn=lambda _: llm_completion
+    )
+    pipe_raw = diarizers.DiarizationPipeline(
+        asr=lambda _: words,
+        diarizer=lambda _, num_speakers=None: turns,
+        llm_refiner=refiner_for_raw,
+        use_locality_gate=False,
+    )
+    self.assertFalse(pipe_raw.prompt_config.use_locality_gate)
+    self.assertFalse(pipe_raw.llm_refiner.prompt_config.use_locality_gate)
+    dt_raw = pipe_raw("dummy.wav")
+    self.assertEqual([w.speaker for w in dt_raw.words], llm_out_spks)
+    self.assertEqual(dt_raw.hyp_spk_llm, dt_raw.hyp_spk_llm_raw)
+
+    # Verify default LG-TPST gates out the 7-word span in a 3-speaker recording
+    refiner_for_lg = llm.DiarizationLMRefiner(
+        completion_fn=lambda _: llm_completion
+    )
+    pipe_lg = diarizers.DiarizationPipeline(
+        asr=lambda _: words,
+        diarizer=lambda _, num_speakers=None: turns,
+        llm_refiner=refiner_for_lg,
+        use_locality_gate=True,
+    )
+    dt_lg = pipe_lg("dummy.wav")
+    self.assertEqual(
+        [w.speaker for w in dt_lg.words],
+        ["1"] * 10 + ["2"] * 10 + ["3"] * 10,
+    )
+
+    # 3. [P1-1 / Minor-2] CLI --no-locality-gate & scripts/inference.py flags
+    with tempfile.TemporaryDirectory() as tmpdir:
+      in_j = os.path.join(tmpdir, "in.json")
+      out_j = os.path.join(tmpdir, "sub", "out.json")
+      with open(in_j, "w", encoding="utf-8") as f_in:
+        json.dump(
+            {
+                "utterances": [
+                    {
+                        "utterance_id": "u1",
+                        "hyp_text": " ".join(w.word for w in words),
+                        "hyp_spk": " ".join(
+                            ["1"] * 10 + ["2"] * 10 + ["3"] * 10
+                        ),
+                    }
+                ]
+            },
+            f_in,
+        )
+      with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        cli.main([
+            "run",
+            "--input-json",
+            in_j,
+            "--output-json",
+            out_j,
+            "--no-locality-gate",
+        ])
+      self.assertTrue(os.path.isfile(out_j))
+
+    # 4. [P1-2 / Minor-3] train.prepare_sft_records_from_json & LoRA SFT
+    with tempfile.TemporaryDirectory() as tmpdir:
+      synth_u = dataprep.generate_synthetic_dataset(num_utterances=2, seed=5)
+      raw_p = os.path.join(tmpdir, "raw_utts.json")
+      list_p = os.path.join(tmpdir, "list_sft.json")
+      with open(raw_p, "w", encoding="utf-8") as f_r:
+        json.dump(synth_u, f_r)
+      recs_from_dict = train.prepare_sft_records_from_json(
+          raw_p, flavor="hyp2ora"
+      )
+      self.assertGreater(len(recs_from_dict), 0)
+      with open(list_p, "w", encoding="utf-8") as f_l:
+        json.dump(recs_from_dict, f_l)
+      recs_from_list = train.prepare_sft_records_from_json(list_p)
+      self.assertEqual(len(recs_from_list), len(recs_from_dict))
+
+      fake_ds_mod = mock.MagicMock()
+      fake_peft_mod = mock.MagicMock()
+      fake_trl_mod = mock.MagicMock()
+
+      class _FakeSFTTrainer:
+
+        def __init__(
+            self,
+            model,
+            train_dataset,
+            args,
+            dataset_text_field="text",
+            max_seq_length=4096,
+            tokenizer=None,
+            data_collator=None,
+        ):
+          del (
+              model,
+              train_dataset,
+              args,
+              dataset_text_field,
+              max_seq_length,
+              tokenizer,
+              data_collator,
+          )
+
+        def train(self):
+          res = mock.MagicMock()
+          res.metrics = {"train_loss": 0.123}
+          return res
+
+      fake_trl_mod.SFTTrainer = _FakeSFTTrainer
+      fake_tok = mock.MagicMock()
+      fake_tok.pad_token = None
+      fake_tok.eos_token = "<eos>"
+      fake_peft_model = mock.MagicMock()
+      fake_peft_mod.get_peft_model.return_value = fake_peft_model
+
+      out_ckpt = os.path.join(tmpdir, "lora_ckpt")
+      t_cfg = train.TrainingConfig(
+          model_name_or_path="google/gemma-4-E4B",
+          output_dir=out_ckpt,
+          max_steps=2,
+      )
+      with (
+          mock.patch(
+              "transformers.AutoTokenizer.from_pretrained",
+              return_value=fake_tok,
+          ),
+          mock.patch(
+              "transformers.AutoModelForCausalLM.from_pretrained",
+              side_effect=ValueError("Gemma4Config"),
+          ),
+          mock.patch(
+              "transformers.Gemma4ForConditionalGeneration",
+              create=True,
+          ) as m_g4_train,
+          mock.patch("transformers.TrainingArguments"),
+          mock.patch.dict(
+              "sys.modules",
+              {
+                  "datasets": fake_ds_mod,
+                  "peft": fake_peft_mod,
+                  "trl": fake_trl_mod,
+              },
+          ),
+      ):
+        m_g4_train.from_pretrained.return_value = mock.MagicMock()
+        train_out = train.run_lora_sft_training(recs_from_dict, cfg=t_cfg)
+        self.assertEqual(train_out["output_dir"], out_ckpt)
+        self.assertIn("train_loss", train_out["metrics"])
+        self.assertTrue(m_g4_train.from_pretrained.called)
+        self.assertTrue(fake_peft_model.save_pretrained.called)
+
+      # Also test Unsloth branch in run_lora_sft_training
+      fake_unsloth = mock.MagicMock()
+      fake_unsloth.FastLanguageModel.from_pretrained.return_value = (
+          mock.MagicMock(),
+          fake_tok,
+      )
+      fake_unsloth.FastLanguageModel.get_peft_model.return_value = (
+          fake_peft_model
+      )
+      t_cfg_unsloth = train.TrainingConfig(
+          model_name_or_path="google/gemma-4-E4B",
+          output_dir=os.path.join(tmpdir, "unsloth_ckpt"),
+          use_unsloth=True,
+          max_steps=1,
+      )
+      with (
+          mock.patch("transformers.TrainingArguments"),
+          mock.patch.dict(
+              "sys.modules",
+              {
+                  "datasets": fake_ds_mod,
+                  "peft": fake_peft_mod,
+                  "trl": fake_trl_mod,
+                  "unsloth": fake_unsloth,
+              },
+          ),
+      ):
+        unsloth_out = train.run_lora_sft_training(
+            recs_from_dict, cfg=t_cfg_unsloth
+        )
+        self.assertIn("train_loss", unsloth_out["metrics"])
+        self.assertTrue(
+            fake_unsloth.FastLanguageModel.get_peft_model.called
+        )
+
 
 if __name__ == "__main__":
   unittest.main()
