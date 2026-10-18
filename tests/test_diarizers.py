@@ -1008,19 +1008,33 @@ class TestASRrefinerPipelineAndEval(unittest.TestCase):
             {"base_model_name_or_path": "google/gemma-4-E4B"}, f_ad
         )
 
+      import importlib.machinery
+      import sys
+      import transformers
+
+      _ = getattr(transformers, "AutoTokenizer", None)
+      _ = getattr(transformers, "AutoModelForCausalLM", None)
+      _ = getattr(transformers, "Gemma4ForConditionalGeneration", None)
+      tf_mod = sys.modules["transformers"]
+
       fake_peft_mod = mock.MagicMock()
+      fake_peft_mod.__spec__ = importlib.machinery.ModuleSpec("peft", None)
       merged_mock = mock.MagicMock()
       merged_mock.merge_and_unload.return_value = _SavedModel()
       fake_peft_mod.PeftModel.from_pretrained.return_value = merged_mock
 
       with (
-          mock.patch("transformers.AutoTokenizer.from_pretrained") as m_tok,
-          mock.patch(
-              "transformers.AutoModelForCausalLM.from_pretrained",
+          mock.patch.object(
+              tf_mod.AutoTokenizer, "from_pretrained"
+          ) as m_tok,
+          mock.patch.object(
+              tf_mod.AutoModelForCausalLM,
+              "from_pretrained",
               side_effect=ValueError("Unrecognized Gemma4Config"),
           ),
-          mock.patch(
-              "transformers.Gemma4ForConditionalGeneration",
+          mock.patch.object(
+              tf_mod,
+              "Gemma4ForConditionalGeneration",
               create=True,
           ) as m_g4,
           mock.patch.dict("sys.modules", {"peft": fake_peft_mod}),
@@ -1234,9 +1248,22 @@ class TestASRrefinerPipelineAndEval(unittest.TestCase):
       recs_from_list = train.prepare_sft_records_from_json(list_p)
       self.assertEqual(len(recs_from_list), len(recs_from_dict))
 
+      import importlib.machinery
+      import sys
+      import transformers
+
+      _ = getattr(transformers, "AutoTokenizer", None)
+      _ = getattr(transformers, "AutoModelForCausalLM", None)
+      _ = getattr(transformers, "Gemma4ForConditionalGeneration", None)
+      _ = getattr(transformers, "TrainingArguments", None)
+      tf_mod = sys.modules["transformers"]
+
       fake_ds_mod = mock.MagicMock()
+      fake_ds_mod.__spec__ = importlib.machinery.ModuleSpec("datasets", None)
       fake_peft_mod = mock.MagicMock()
+      fake_peft_mod.__spec__ = importlib.machinery.ModuleSpec("peft", None)
       fake_trl_mod = mock.MagicMock()
+      fake_trl_mod.__spec__ = importlib.machinery.ModuleSpec("trl", None)
 
       class _FakeSFTTrainer:
 
@@ -1279,19 +1306,22 @@ class TestASRrefinerPipelineAndEval(unittest.TestCase):
           max_steps=2,
       )
       with (
-          mock.patch(
-              "transformers.AutoTokenizer.from_pretrained",
+          mock.patch.object(
+              tf_mod.AutoTokenizer,
+              "from_pretrained",
               return_value=fake_tok,
           ),
-          mock.patch(
-              "transformers.AutoModelForCausalLM.from_pretrained",
+          mock.patch.object(
+              tf_mod.AutoModelForCausalLM,
+              "from_pretrained",
               side_effect=ValueError("Gemma4Config"),
           ),
-          mock.patch(
-              "transformers.Gemma4ForConditionalGeneration",
+          mock.patch.object(
+              tf_mod,
+              "Gemma4ForConditionalGeneration",
               create=True,
           ) as m_g4_train,
-          mock.patch("transformers.TrainingArguments"),
+          mock.patch.object(tf_mod, "TrainingArguments"),
           mock.patch.dict(
               "sys.modules",
               {
@@ -1310,6 +1340,7 @@ class TestASRrefinerPipelineAndEval(unittest.TestCase):
 
       # Also test Unsloth branch in run_lora_sft_training
       fake_unsloth = mock.MagicMock()
+      fake_unsloth.__spec__ = importlib.machinery.ModuleSpec("unsloth", None)
       fake_unsloth.FastLanguageModel.from_pretrained.return_value = (
           mock.MagicMock(),
           fake_tok,
@@ -1324,7 +1355,7 @@ class TestASRrefinerPipelineAndEval(unittest.TestCase):
           max_steps=1,
       )
       with (
-          mock.patch("transformers.TrainingArguments"),
+          mock.patch.object(tf_mod, "TrainingArguments"),
           mock.patch.dict(
               "sys.modules",
               {
