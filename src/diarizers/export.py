@@ -10,24 +10,14 @@ def _load_causal_or_gemma4_model(
     model_id_or_path: str,
     torch_dtype: Any,
 ) -> Any:
-  """Loads a CausalLM or Gemma-4 conditional generation model."""
+  """Loads a CausalLM, Gemma-4, or Gemma-4 Unified (`12B-v1`) model."""
   import transformers
 
-  try:
-    return transformers.AutoModelForCausalLM.from_pretrained(
-        model_id_or_path, torch_dtype=torch_dtype
-    )
-  except ValueError:
-    cls_cand = getattr(
-        transformers,
-        "Gemma4ForConditionalGeneration",
-        getattr(transformers, "AutoModelForImageTextToText", None),
-    )
-    if cls_cand is None:
-      raise
-    return cls_cand.from_pretrained(
-        model_id_or_path, torch_dtype=torch_dtype
-    )
+  from diarizers import llm as llm_lib
+
+  return llm_lib.load_hf_diarizationlm_model(
+      transformers, model_id_or_path, dtype=torch_dtype
+  )
 
 
 def export_merged_safetensors(

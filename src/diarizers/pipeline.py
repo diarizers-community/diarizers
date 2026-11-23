@@ -2,7 +2,7 @@
 
 from collections.abc import Callable, Sequence
 import dataclasses
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -12,6 +12,8 @@ from diarizers import configs
 from diarizers import diarization as diar_lib
 from diarizers import llm as llm_lib
 from diarizers import types
+
+_UNSET: Any = object()
 
 
 class DiarizersPipeline:
@@ -57,36 +59,57 @@ class DiarizersPipeline:
   @classmethod
   def from_pretrained(
       cls,
-      asr_model: str = "openai/whisper-large-v3-turbo",
-      diarizer_preset: configs.DiarizationPreset = (
-          configs.FISHER_TELEPHONY_PRESET
-      ),
+      asr_model: Any = _UNSET,
+      diarizer_preset: Any = _UNSET,
       segmentation_model: Optional[str] = "default",
-      llm_model_or_path: Optional[str] = None,
+      llm_model_or_path: Any = _UNSET,
       llm_gguf_filename: Optional[str] = None,
       llm_backend: str = "auto",
       device: str = "cpu",
-      use_locality_gate: bool = True,
+      use_locality_gate: Any = _UNSET,
+      profile: str = "best-quality",
   ) -> "DiarizersPipeline":
     """Constructs a complete DiarizersPipeline from open-source checkpoints."""
+    prof = configs.resolve_pipeline_profile(profile)
+    resolved_asr = (
+        prof.asr_model if asr_model is _UNSET else str(asr_model)
+    )
+    resolved_preset = (
+        prof.diarization if diarizer_preset is _UNSET else diarizer_preset
+    )
+    if llm_model_or_path is _UNSET:
+      resolved_llm = prof.llm_model_or_path
+    elif (
+        llm_model_or_path is None
+        or str(llm_model_or_path).strip().lower() in ("", "none", "off")
+    ):
+      resolved_llm = None
+    else:
+      resolved_llm = str(llm_model_or_path)
+    resolved_lg = (
+        prof.use_locality_gate
+        if use_locality_gate is _UNSET
+        else bool(use_locality_gate)
+    )
+
     asr_engine = asr_lib.WhisperWordASR(
-        model_name_or_path=asr_model, device=device
+        model_name_or_path=resolved_asr, device=device
     )
     diar_engine = diar_lib.ECAPASpectralDiarizer(
-        preset=diarizer_preset,
+        preset=resolved_preset,
         device=device,
         segmentation_model=segmentation_model,
     )
-    p_cfg = configs.PromptConfig(use_locality_gate=use_locality_gate)
+    p_cfg = configs.PromptConfig(use_locality_gate=resolved_lg)
     refiner = (
         llm_lib.DiarizationLMRefiner(
-            model_path_or_repo=llm_model_or_path,
+            model_path_or_repo=resolved_llm,
             gguf_filename=llm_gguf_filename,
             backend=llm_backend,
             prompt_config=p_cfg,
             device=device,
         )
-        if llm_model_or_path
+        if resolved_llm
         else None
     )
     return cls(
@@ -95,6 +118,15 @@ class DiarizersPipeline:
         llm_refiner=refiner,
         prompt_config=p_cfg,
     )
+
+  @classmethod
+  def from_profile(
+      cls,
+      profile: str = "best-quality",
+      **kwargs: Any,
+  ) -> "DiarizersPipeline":
+    """Constructs a DiarizersPipeline from a named profile ('best-quality')."""
+    return cls.from_pretrained(profile=profile, **kwargs)
 
   def __call__(
       self,
@@ -118,9 +150,27 @@ class DiarizersPipeline:
       turns = self.diarizer_backend(audio_input, num_speakers=num_speakers)
 
     # Stage 3: Word-Speaker Alignment
-    acoustic_spks = alignment.assign_speakers(
-        words, turns, normalize_speaker_ids=True
+    frame_probs = (
+        getattr(self.diarizer_backend, "last_frame_probs", None)
+        if precomputed_turns is None
+        else None
     )
+    frame_dt = getattr(self.diarizer_backend, "last_frame_dt", 10.0 / 295.0)
+    if (
+        frame_probs is not None
+        and isinstance(frame_probs, np.ndarray)
+        and frame_probs.ndim == 2
+        and frame_probs.shape[0] > 0
+        and frame_probs.shape[1] >= 1
+    ):
+      acoustic_spks = alignment.assign_speakers_from_probs(
+          words, frame_probs, frame_dt=float(frame_dt),
+          normalize_speaker_ids=True,
+      )
+    else:
+      acoustic_spks = alignment.assign_speakers(
+          words, turns, normalize_speaker_ids=True
+      )
     word_strs = [w.word for w in words]
     hyp_text = " ".join(word_strs)
     hyp_spk = " ".join(acoustic_spks)

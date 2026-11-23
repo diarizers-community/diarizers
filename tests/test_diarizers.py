@@ -367,8 +367,12 @@ class TestSpectralAndDiarization(unittest.TestCase):
         "pyannote/segmentation-3.0",
     )
     self.assertEqual(
+        configs.DEFAULT_DIARIZERS_CONFIG.diarization,
+        configs.UNIVERSAL_AUTO_PRESET,
+    )
+    self.assertEqual(
         configs.DEFAULT_DIARIZERS_CONFIG.llm_model_or_path,
-        "diarizers-community/DiarizationLM-Gemma-4-E4B-v1",
+        "diarizers-community/DiarizationLM-Gemma-4-12B-v1",
     )
 
 
@@ -1373,6 +1377,416 @@ class TestASRrefinerPipelineAndEval(unittest.TestCase):
         self.assertTrue(
             fake_unsloth.FastLanguageModel.get_peft_model.called
         )
+
+
+class TestV2PowersetFlaxSpeakerAndLLM(unittest.TestCase):
+  """Tests FlaxSpeaker, powerset Ward clustering, and E4B-v2/12B-v1 support."""
+
+  def test_flaxspeaker_mel_id_and_tiny_model(self) -> None:
+    from diarizers import flaxspeaker_encoder as fse
+
+    self.assertTrue(
+        fse.is_flaxspeaker_model_id("wq2012/univ_full_eres2conformer_xl")
+    )
+    self.assertTrue(
+        fse.is_flaxspeaker_model_id("wq2012/univ_full_eres2conformer_large")
+    )
+    self.assertFalse(
+        fse.is_flaxspeaker_model_id("speechbrain/spkrec-ecapa-voxceleb")
+    )
+
+    sr = 16000
+    t = np.linspace(0, 1.5, int(1.5 * sr), endpoint=False, dtype=np.float32)
+    wav = 0.2 * np.sin(2 * np.pi * 220.0 * t)
+    mel = fse.compute_flaxspeaker_log_mel(wav, sample_rate=sr, apply_cmvn=True)
+    self.assertEqual(mel.ndim, 2)
+    self.assertEqual(mel.shape[1], 80)
+    self.assertTrue(np.all(np.isfinite(mel)))
+
+    # Pure-NumPy Hybrid-PFAS similarity matrix sanity and symmetry
+    rng = np.random.default_rng(7)
+    raw_vecs = rng.normal(size=(4, 256 + 8 * (32 + 96))).astype(np.float32)
+    sim = fse.compute_hybrid_pfas_similarity_matrix(
+        raw_vecs,
+        cosine_dim=256,
+        num_keys=8,
+        key_dim=32,
+        value_dim=96,
+        hybrid_alpha=0.5,
+        scale_factor=5.0,
+    )
+    self.assertEqual(sim.shape, (4, 4))
+    np.testing.assert_allclose(sim, sim.T, atol=1e-5)
+
+    if diarization.torch is not None:
+      import torch
+
+      tiny_cfg = {
+          "experiment_dict": {
+              "model": {
+                  "embedding_dim": 16,
+                  "eres2conformer": {
+                      "base_channels": 8,
+                      "num_blocks": [1, 1, 1, 1],
+                      "scale": 2,
+                      "width_mult": 1.0,
+                      "use_simam": True,
+                      "use_se": True,
+                      "use_aff": True,
+                      "use_mfa_stage23": True,
+                      "conformer_dim": 16,
+                      "num_conformer_layers": 1,
+                      "num_heads": 2,
+                      "conv_kernel_size": 3,
+                      "temporal_strides": [1, 1, 2, 2],
+                  },
+                  "pooling": {"pooling_type": "catp"},
+              },
+              "frontend": {"n_mels": 16, "sample_rate": 16000},
+          }
+      }
+      net = fse.FlaxSpeakerERes2Conformer(tiny_cfg, atp_num_heads=2)
+      net.eval()
+      x = torch.randn(1, 20, 16)
+      mask_clean = torch.ones(1, 20)
+      x_pad = torch.cat([x, torch.randn(1, 12, 16)], dim=1)
+      mask_pad = torch.cat(
+          [torch.ones(1, 20), torch.zeros(1, 12)], dim=1
+      )
+      with torch.no_grad():
+        e1 = net(x, mask=mask_clean)
+        e2 = net(x_pad, mask=mask_pad)
+      self.assertEqual(tuple(e1.shape), (1, 16))
+      self.assertAlmostEqual(float(e1.norm().item()), 1.0, delta=1e-4)
+      self.assertTrue(torch.all(torch.isfinite(e2)).item())
+
+  def test_ward_auto_k_balanced_centering_and_em(self) -> None:
+    rng = np.random.default_rng(123)
+    dim = 16
+    bias = np.zeros(dim, dtype=np.float32)
+    bias[0] = 2.0
+    c1 = np.zeros(dim, dtype=np.float32)
+    c1[1] = 1.0
+    c2 = np.zeros(dim, dtype=np.float32)
+    c2[2] = 1.0
+    c3 = np.zeros(dim, dtype=np.float32)
+    c3[3] = 1.0
+    # Unbalanced speaker counts (12 : 4 : 4) with strong channel bias
+    pts = np.vstack([
+        np.tile(c1, (12, 1)) + 0.05 * rng.normal(size=(12, dim)),
+        np.tile(c2, (4, 1)) + 0.05 * rng.normal(size=(4, dim)),
+        np.tile(c3, (4, 1)) + 0.05 * rng.normal(size=(4, dim)),
+    ]).astype(np.float32)
+    durs = np.full(20, 4.0, dtype=np.float32)
+
+    lbl = spectral.ward_cluster_auto_k(
+        pts,
+        min_clusters=1,
+        max_clusters=8,
+        merge_threshold=0.60,
+        min_cluster_weight=8.0,
+        weights=durs,
+    )
+    self.assertEqual(len(set(lbl.tolist())), 3)
+    self.assertEqual(len(set(lbl[:12].tolist())), 1)
+    self.assertEqual(len(set(lbl[12:16].tolist())), 1)
+    self.assertEqual(len(set(lbl[16:20].tolist())), 1)
+
+    # Balanced centering pulls biased vectors back apart cleanly
+    biased = spectral.l2_normalize_rows(pts + bias[None, :])
+    raw_c, _ = spectral.compute_weighted_centroids(biased, lbl, weights=durs)
+    centered = spectral.balance_center_embeddings(
+        biased, biased, lbl, weights=durs, beta=1.0
+    )
+    cen_c, _ = spectral.compute_weighted_centroids(centered, lbl, weights=durs)
+    off_raw = float((raw_c @ raw_c.T)[0, 1])
+    off_cen = float((cen_c @ cen_c.T)[0, 1])
+    self.assertLess(off_cen, off_raw)
+
+    # Cosine-EM cannot-link keeps tracks in the same chunk distinct
+    chunk_ids = np.array([0, 0, 1, 1], dtype=np.int32)
+    em_pts = np.array([
+        [0.99, 0.14, 0.0, 0.0],
+        [0.95, 0.31, 0.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+    ], dtype=np.float32)
+    em_lbl = spectral.refine_cosine_em(
+        em_pts,
+        np.array([0, 1, 0, 1], dtype=np.int32),
+        chunk_ids=chunk_ids,
+        n_iters=3,
+        enforce_cannot_link=True,
+    )
+    self.assertNotEqual(int(em_lbl[0]), int(em_lbl[1]))
+
+  def test_stitch_powerset_probs_and_pipeline_integration(self) -> None:
+    chunk_starts = np.array([0.0, 2.5], dtype=np.float32)
+    n_ds = 100
+    ml_soft = np.zeros((2, n_ds, 3), dtype=np.float32)
+    # Chunk 0: local 0 active 0..5s, local 1 active 5..10s
+    ml_soft[0, :50, 0] = 0.95
+    ml_soft[0, 50:, 1] = 0.95
+    # Chunk 1 (starts at 2.5s): permuted local indices without emb for local 0
+    ml_soft[1, :25, 2] = 0.95
+    ml_soft[1, 25:, 0] = 0.95
+    cs_meta = np.array([
+        [0.0, 0.0, 5.0],
+        [0.0, 1.0, 5.0],
+        [1.0, 2.0, 2.5],
+    ], dtype=np.float32)
+    cs_embs = np.array([
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+    ], dtype=np.float32)
+    cents = np.array([
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+    ], dtype=np.float32)
+    probs, dt = diarization.stitch_powerset_probs(
+        chunk_starts=chunk_starts,
+        ml_soft=ml_soft,
+        cs_meta=cs_meta,
+        cs_embs_all=cs_embs,
+        centroids=cents,
+        duration_sec=12.5,
+        prob_smooth_sec=0.1,
+    )
+    self.assertEqual(probs.shape[1], 2)
+    turns = diarization.probs_to_speaker_turns(probs, dt, duration_sec=12.5)
+    self.assertGreaterEqual(len(turns), 2)
+
+    words = [
+        types.WordSegment("hello", 0.5, 1.5),
+        types.WordSegment("world", 3.0, 4.0),
+        types.WordSegment("hi", 6.0, 7.0),
+        types.WordSegment("there", 10.5, 11.5),
+    ]
+    spks = alignment.assign_speakers_from_probs(words, probs, dt)
+    self.assertEqual(spks, ["1", "1", "2", "2"])
+
+    class _FakeProbDiar:
+      last_frame_probs = probs
+      last_frame_dt = dt
+
+      def __call__(self, audio, num_speakers=None):
+        del audio, num_speakers
+        return [types.SpeakerTurn(0.0, 12.5, "1")]
+
+    pipe = pipeline.DiarizersPipeline(
+        asr_backend=lambda _: words,
+        diarizer_backend=_FakeProbDiar(),
+    )
+    res = pipe(np.zeros(16000, dtype=np.float32))
+    self.assertEqual(res.hyp_spk, "1 1 2 2")
+
+  def test_llm_gguf_resolution_unified_loader_and_alignment_guards(
+      self,
+  ) -> None:
+    from unittest import mock
+    self.assertEqual(
+        llm.resolve_default_gguf_filename(
+            "diarizers-community/DiarizationLM-Gemma-4-E4B-v1"
+        ),
+        "DiarizationLM-Gemma-4-E4B-v1-q4_k_m.gguf",
+    )
+    self.assertEqual(
+        llm.resolve_default_gguf_filename(
+            "diarizers-community/DiarizationLM-Gemma-4-E4B-v2"
+        ),
+        "DiarizationLM-Gemma-4-E4B-v2-q4_k_m.gguf",
+    )
+    self.assertEqual(
+        llm.resolve_default_gguf_filename(
+            "diarizers-community/DiarizationLM-Gemma-4-12B-v1"
+        ),
+        "DiarizationLM-Gemma-4-12B-v1-q4_k_m.gguf",
+    )
+
+    # Gemma4Unified / AutoModelForImageTextToText fallback dispatch
+    fake_tf = mock.MagicMock()
+    fake_tf.AutoModelForCausalLM.from_pretrained.side_effect = ValueError(
+        "gemma4_unified"
+    )
+    fake_tf.Gemma4ForConditionalGeneration.from_pretrained.side_effect = (
+        ValueError("unsupported")
+    )
+    fake_tf.Gemma4UnifiedForConditionalGeneration = None
+    sentinel_model = object()
+    fake_tf.AutoModelForImageTextToText.from_pretrained.return_value = (
+        sentinel_model
+    )
+    loaded = llm.load_hf_diarizationlm_model(
+        fake_tf,
+        "diarizers-community/DiarizationLM-Gemma-4-12B-v1",
+        dtype="bf16",
+    )
+    self.assertIs(loaded, sentinel_model)
+
+    # Control token stripping preserves truncation at <turn|>
+    raw_comp = (
+        "<|channel>thought\nplan\n<channel|>"
+        "<speaker:1> hello <ctrl42>world [eod] junk <turn|> more junk"
+    )
+    cleaned = alignment.truncate_completion_suffix(raw_comp)
+    self.assertEqual(cleaned, "<speaker:1> hello world")
+    no_eod = "<speaker:1> hi there <turn|> trailing garbage"
+    self.assertEqual(
+        alignment.truncate_completion_suffix(no_eod), "<speaker:1> hi there"
+    )
+
+    # Multilingual non-space script tokenization (CJK + English + Thai)
+    toks = alignment.tokenize_multilingual_text("hello 你好世界 hi")
+    self.assertEqual(toks, ["hello", "你", "好", "世", "界", "hi"])
+
+    # Byte-budget chunking bounds UTF-8 bytes rather than characters
+    cjk_words = ["你好世界"] * 10
+    cjk_spks = ["1"] * 10
+    ch_bytes = alignment.UtteranceChunker(
+        max_input_length=60, use_byte_budget=True
+    )
+    chunks = list(ch_bytes.chunk_utterance_fields(cjk_words, cjk_spks))
+    self.assertGreater(len(chunks), 1)
+
+    # Word edit-rate guard falls back cleanly when completion hallucinates
+    words = ["hello", "world", "how", "are", "you", "today"]
+    hyps = ["1", "1", "1", "2", "2", "2"]
+    _, lg_fb = alignment.reconcile_chunk_speakers_hungarian(
+        utt_words=words,
+        utt_hyp_spks=hyps,
+        chunk_completions=["<speaker:2> banana mango papaya kiwi apple [eod]"],
+        max_chunk_word_edit_rate=0.35,
+    )
+    self.assertEqual(lg_fb, "1 1 1 2 2 2")
+
+    # Verify presets exported cleanly
+    import diarizers
+
+    self.assertEqual(
+        diarizers.FLAXSPEAKER_XL_PRESET.encoder_name,
+        "wq2012/univ_full_eres2conformer_xl",
+    )
+    self.assertEqual(
+        diarizers.FLAXSPEAKER_LARGE_PRESET.ward_merge_threshold, 0.70
+    )
+    self.assertEqual(diarizers.UNIVERSAL_AUTO_PRESET.min_clusters, 1)
+    self.assertEqual(diarizers.UNIVERSAL_AUTO_PRESET.max_clusters, 10)
+
+    # Verify llama-cpp flash_attn kwarg with graceful TypeError fallback
+    fake_llama_mod = mock.MagicMock()
+    calls = []
+
+    def _fake_llama(**kwargs):
+      calls.append(dict(kwargs))
+      if "flash_attn" in kwargs:
+        raise TypeError("unexpected keyword argument 'flash_attn'")
+      return mock.MagicMock()
+
+    fake_llama_mod.Llama = _fake_llama
+    with tempfile.NamedTemporaryFile(suffix=".gguf") as tf_file:
+      refiner = llm.DiarizationLMRefiner(
+          model_path_or_repo=tf_file.name, backend="gguf"
+      )
+      with mock.patch.dict("sys.modules", {"llama_cpp": fake_llama_mod}):
+        refiner._ensure_loaded()
+      self.assertEqual(len(calls), 2)
+      self.assertTrue(calls[0]["flash_attn"])
+      self.assertNotIn("flash_attn", calls[1])
+
+  def test_pipeline_profiles_and_auto_cpu_gguf(self) -> None:
+    from unittest import mock
+    import diarizers
+
+    # 1. Profile resolution & aliases
+    p_best = diarizers.resolve_pipeline_profile("best-quality")
+    self.assertEqual(p_best.name, "best-quality")
+    self.assertEqual(
+        p_best.llm_model_or_path,
+        "diarizers-community/DiarizationLM-Gemma-4-12B-v1",
+    )
+    self.assertEqual(p_best.diarization, configs.UNIVERSAL_AUTO_PRESET)
+    self.assertEqual(diarizers.resolve_pipeline_profile("best"), p_best)
+    self.assertEqual(diarizers.resolve_pipeline_profile("default"), p_best)
+
+    p_max = diarizers.resolve_pipeline_profile("max")
+    self.assertEqual(p_max.diarization, configs.FLAXSPEAKER_XL_PRESET)
+    self.assertEqual(
+        p_max.llm_model_or_path,
+        "diarizers-community/DiarizationLM-Gemma-4-12B-v1",
+    )
+    self.assertEqual(diarizers.resolve_pipeline_profile("flaxspeaker"), p_max)
+
+    p_fast = diarizers.resolve_pipeline_profile("fast")
+    self.assertEqual(p_fast.diarization, configs.UNIVERSAL_AUTO_PRESET)
+    self.assertEqual(
+        p_fast.llm_model_or_path,
+        "diarizers-community/DiarizationLM-Gemma-4-E4B-v2",
+    )
+    self.assertEqual(diarizers.resolve_pipeline_profile("balanced"), p_fast)
+
+    p_ac = diarizers.resolve_pipeline_profile("acoustic-only")
+    self.assertIsNone(p_ac.llm_model_or_path)
+    self.assertEqual(diarizers.resolve_pipeline_profile("no-llm"), p_ac)
+
+    with self.assertRaises(ValueError):
+      diarizers.resolve_pipeline_profile("unknown-profile-xyz")
+
+    # 2. DiarizersPipeline.from_pretrained / from_profile (lazy init, 0 network)
+    pipe_default = diarizers.DiarizersPipeline.from_pretrained()
+    self.assertEqual(
+        pipe_default.diarizer_backend.preset, configs.UNIVERSAL_AUTO_PRESET
+    )
+    assert pipe_default.llm_refiner is not None
+    self.assertEqual(
+        pipe_default.llm_refiner.model_path_or_repo,
+        "diarizers-community/DiarizationLM-Gemma-4-12B-v1",
+    )
+
+    pipe_fast = diarizers.DiarizersPipeline.from_profile("fast")
+    assert pipe_fast.llm_refiner is not None
+    self.assertEqual(
+        pipe_fast.llm_refiner.model_path_or_repo,
+        "diarizers-community/DiarizationLM-Gemma-4-E4B-v2",
+    )
+
+    pipe_max = diarizers.DiarizersPipeline.from_pretrained(profile="max")
+    self.assertEqual(
+        pipe_max.diarizer_backend.preset, configs.FLAXSPEAKER_XL_PRESET
+    )
+
+    pipe_ac = diarizers.DiarizersPipeline.from_pretrained(
+        profile="acoustic-only"
+    )
+    self.assertIsNone(pipe_ac.llm_refiner)
+
+    pipe_override_none = diarizers.DiarizersPipeline.from_pretrained(
+        profile="best-quality", llm_model_or_path=None
+    )
+    self.assertIsNone(pipe_override_none.llm_refiner)
+
+    # 3. backend="auto" on CPU prefers GGUF when llama_cpp is installed
+    fake_llama = mock.MagicMock()
+    fake_hf_hub = mock.MagicMock()
+    fake_hf_hub.hf_hub_download.return_value = "/tmp/fake-e4b-v2.gguf"
+    ref_auto_cpu = llm.DiarizationLMRefiner(
+        model_path_or_repo="diarizers-community/DiarizationLM-Gemma-4-E4B-v2",
+        backend="auto",
+        device="cpu",
+    )
+    with (
+        mock.patch("importlib.util.find_spec", return_value=object()),
+        mock.patch.dict(
+            "sys.modules",
+            {"llama_cpp": fake_llama, "huggingface_hub": fake_hf_hub},
+        ),
+    ):
+      ref_auto_cpu._ensure_loaded()
+    fake_hf_hub.hf_hub_download.assert_called_once_with(
+        repo_id="diarizers-community/DiarizationLM-Gemma-4-E4B-v2",
+        filename="DiarizationLM-Gemma-4-E4B-v2-q4_k_m.gguf",
+    )
+    self.assertTrue(fake_llama.Llama.called)
 
 
 if __name__ == "__main__":

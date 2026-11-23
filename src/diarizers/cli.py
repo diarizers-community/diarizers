@@ -1,6 +1,7 @@
-"""Command-line interface for the unified Diarizers v1.0.1 package."""
+"""Command-line interface for the unified Diarizers package."""
 
 import argparse
+import dataclasses
 import json
 import os
 import sys
@@ -20,6 +21,12 @@ _PRESET_MAP = {
     "callhome": configs.CALLHOME_TELEPHONY_PRESET,
     "ami": configs.AMI_MEETING_PRESET,
     "meeting": configs.MEETING_MULTISPK_PRESET,
+    "auto": configs.UNIVERSAL_AUTO_PRESET,
+    "universal": configs.UNIVERSAL_AUTO_PRESET,
+    "flaxspeaker": configs.FLAXSPEAKER_XL_PRESET,
+    "flaxspeaker-large": configs.FLAXSPEAKER_LARGE_PRESET,
+    "flaxspeaker-v2": configs.FLAXSPEAKER_V2_PRESET,
+    "flaxspeaker-xl": configs.FLAXSPEAKER_XL_PRESET,
 }
 
 
@@ -95,13 +102,33 @@ def _cmd_evaluate(args: argparse.Namespace) -> None:
       json.dump(res, f, indent=2)
 
 
+def _resolve_cli_llm_model(
+    llm_arg: Optional[str],
+    profile_arg: Optional[str],
+    for_audio: bool,
+) -> Optional[str]:
+  """Resolves CLI --llm-model and --profile with 'none' support."""
+  if llm_arg is not None:
+    if llm_arg.strip().lower() in ("", "none", "off", "false"):
+      return None
+    return llm_arg
+  if profile_arg is not None or for_audio:
+    prof = configs.resolve_pipeline_profile(profile_arg or "best-quality")
+    return prof.llm_model_or_path
+  return None
+
+
 def _cmd_infer(args: argparse.Namespace) -> None:
   use_lg = not getattr(args, "no_locality_gate", False)
+  profile_arg = getattr(args, "profile", None)
   if args.input_json:
     with open(args.input_json, "r", encoding="utf-8") as f:
       data = json.load(f)
+    llm_model = _resolve_cli_llm_model(
+        args.llm_model, profile_arg, for_audio=False
+    )
     refiner = llm.DiarizationLMRefiner(
-        model_path_or_repo=args.llm_model,
+        model_path_or_repo=llm_model,
         gguf_filename=args.gguf_file,
         backend=args.llm_backend,
         prompt_config=configs.PromptConfig(use_locality_gate=use_lg),
@@ -119,18 +146,33 @@ def _cmd_infer(args: argparse.Namespace) -> None:
 
   if not args.audio:
     raise ValueError("Provide --audio or --input_json.")
-  preset = _PRESET_MAP.get(
-      args.preset.lower(), configs.FISHER_TELEPHONY_PRESET
+  prof = configs.resolve_pipeline_profile(profile_arg or "best-quality")
+  if args.preset:
+    preset = _PRESET_MAP.get(args.preset.lower(), prof.diarization)
+  else:
+    preset = prof.diarization
+  encoder_override = getattr(args, "encoder_model", None)
+  mode_override = getattr(args, "diarization_mode", None)
+  if encoder_override or mode_override:
+    preset_kwargs = {}
+    if encoder_override:
+      preset_kwargs["encoder_name"] = encoder_override
+    if mode_override:
+      preset_kwargs["diarization_mode"] = mode_override
+    preset = dataclasses.replace(preset, **preset_kwargs)
+  llm_model = _resolve_cli_llm_model(
+      args.llm_model, profile_arg, for_audio=True
   )
   pipe = pipeline.DiarizersPipeline.from_pretrained(
-      asr_model=args.asr_model,
+      asr_model=args.asr_model or prof.asr_model,
       diarizer_preset=preset,
       segmentation_model=args.segmentation_model,
-      llm_model_or_path=args.llm_model,
+      llm_model_or_path=llm_model,
       llm_gguf_filename=args.gguf_file,
       llm_backend=args.llm_backend,
       device=args.device,
       use_locality_gate=use_lg,
+      profile=prof.name,
   )
   transcript = pipe(args.audio, num_speakers=args.num_speakers)
   print(transcript.to_text(use_llm_speaker=True))
@@ -356,10 +398,34 @@ def main(argv: Optional[List[str]] = None) -> None:
         help="Path to output VTT subtitles",
     )
     p_inf.add_argument(
+        "--profile",
+        default=None,
+        choices=sorted(configs.PIPELINE_PROFILE_ALIASES.keys()),
+        help=(
+            "High-level quality/speed profile: best-quality (default), "
+            "max (FlaxSpeaker-XL), fast (E4B-v2), or acoustic-only"
+        ),
+    )
+    p_inf.add_argument(
         "--preset",
-        default="telephony",
-        choices=["telephony", "fisher", "callhome", "ami", "meeting"],
-        help="Acoustic diarization preset",
+        default=None,
+        choices=sorted(_PRESET_MAP.keys()),
+        help="Optional acoustic diarization preset override",
+    )
+    p_inf.add_argument(
+        "--encoder_model",
+        "--encoder-model",
+        dest="encoder_model",
+        default=None,
+        help="Optional speaker encoder HF repo/path override",
+    )
+    p_inf.add_argument(
+        "--diarization_mode",
+        "--diarization-mode",
+        dest="diarization_mode",
+        default=None,
+        choices=["powerset_ward", "sliding_spectral"],
+        help="Acoustic clustering engine mode",
     )
     p_inf.add_argument(
         "--asr_model",

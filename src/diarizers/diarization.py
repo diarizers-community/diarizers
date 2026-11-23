@@ -1,11 +1,14 @@
 """Open-source Apache-2.0 Speaker Diarization backends."""
 
+import math
 import os
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import warnings
 import wave
 
 import numpy as np
+from scipy import optimize
+from scipy.ndimage import gaussian_filter
 
 try:
   import soundfile as sf
@@ -37,6 +40,7 @@ except ImportError:  # pragma: no cover
   F = None  # type: ignore
 
 from diarizers import configs
+from diarizers import flaxspeaker_encoder
 from diarizers import spectral
 from diarizers import types
 
@@ -613,6 +617,7 @@ def compute_log_mel_fbank(
     waveform: np.ndarray,
     sample_rate: int = 16000,
     num_mel_bins: int = 80,
+    apply_cmvn: bool = True,
 ) -> Any:
   """Computes CMVN-normalized 80-dim dB log-mel filterbank features (T, 80)."""
   wav_f32 = np.asarray(waveform, dtype=np.float32)
@@ -640,7 +645,9 @@ def compute_log_mel_fbank(
     ).to(power.device)
     fbank = 10.0 * torch.log10(torch.clamp(power @ mel_mat, min=1e-10))
     fbank = torch.maximum(fbank, fbank.max() - 80.0)
-    return fbank - fbank.mean(dim=0, keepdim=True)
+    if apply_cmvn:
+      return fbank - fbank.mean(dim=0, keepdim=True)
+    return fbank
 
   # Pure-NumPy fallback when PyTorch is unavailable
   hop = max(1, int(0.010 * sample_rate))
@@ -658,7 +665,202 @@ def compute_log_mel_fbank(
       10.0 * np.log10(np.maximum(spec @ mel_proj, 1e-10))
   ).astype(np.float32)
   fbank_np = np.maximum(fbank_np, np.max(fbank_np) - 80.0)
-  return fbank_np - np.mean(fbank_np, axis=0, keepdims=True)
+  if apply_cmvn:
+    return fbank_np - np.mean(fbank_np, axis=0, keepdims=True)
+  return fbank_np
+
+
+def stitch_powerset_probs(
+    chunk_starts: np.ndarray,
+    ml_soft: np.ndarray,
+    cs_meta: np.ndarray,
+    cs_embs_all: np.ndarray,
+    centroids: np.ndarray,
+    duration_sec: float,
+    chunk_window_weight: str = "uniform",
+    use_temporal_stitch: bool = True,
+    stitch_weight: float = 0.50,
+    prob_smooth_sec: float = 0.25,
+) -> Tuple[np.ndarray, float]:
+  """Stitches overlapping 10s local curves into global `(T, K)` soft probs.
+
+  Uses two-pass Hungarian assignment combining cosine similarity against
+  ``centroids`` and overlap correlation across adjacent 10s powerset windows.
+  """
+  n_chunks, n_frames, _ = ml_soft.shape
+  frame_dt = 10.0 / float(max(1, n_frames))
+  n_k = int(centroids.shape[0])
+  if n_chunks == 0 or n_k == 0:
+    return np.zeros((0, max(1, n_k)), dtype=np.float32), frame_dt
+  max_end = max(float(duration_sec), float(chunk_starts[-1]) + 10.0)
+  total_frames = max(n_frames, int(math.ceil(max_end / frame_dt)) + 2)
+  if n_k == 1:
+    probs = np.zeros((total_frames, 1), dtype=np.float32)
+    den = np.zeros((total_frames,), dtype=np.float32)
+    for ci in range(n_chunks):
+      f0 = int(round(float(chunk_starts[ci]) / frame_dt))
+      f1 = min(total_frames, f0 + n_frames)
+      ln = f1 - f0
+      if ln > 0:
+        probs[f0:f1, 0] += np.max(ml_soft[ci, :ln, :], axis=1)
+        den[f0:f1] += 1.0
+    return probs / np.maximum(den[:, None], 1e-6), frame_dt
+
+  if chunk_window_weight == "hann":
+    w_chunk = np.maximum(
+        np.hanning(n_frames + 2)[1:-1].astype(np.float32), 0.1
+    )
+  elif chunk_window_weight == "tri":
+    ramp = np.linspace(0.1, 1.0, max(1, n_frames // 2), dtype=np.float32)
+    w_chunk = np.concatenate([ramp, ramp[::-1]])
+    if len(w_chunk) < n_frames:
+      w_chunk = np.pad(w_chunk, (0, n_frames - len(w_chunk)), mode="edge")
+    w_chunk = w_chunk[:n_frames]
+  else:
+    w_chunk = np.ones((n_frames,), dtype=np.float32)
+
+  embs_n = (
+      spectral.l2_normalize_rows(cs_embs_all)
+      if len(cs_embs_all) > 0
+      else np.asarray(cs_embs_all, dtype=np.float32)
+  )
+  cents_n = spectral.l2_normalize_rows(centroids)
+  chunk_to_rows: Dict[int, List[int]] = {}
+  for r_idx in range(len(cs_meta)):
+    ci_row = int(round(float(cs_meta[r_idx, 0])))
+    chunk_to_rows.setdefault(ci_row, []).append(r_idx)
+
+  ml_f = np.asarray(ml_soft, dtype=np.float32)
+  probs_num = np.zeros((total_frames, n_k), dtype=np.float32)
+  probs_den = np.zeros((total_frames,), dtype=np.float32)
+
+  n_passes = 2 if use_temporal_stitch else 1
+  for pass_idx in range(n_passes):
+    cur_num = np.zeros((total_frames, n_k), dtype=np.float32)
+    cur_den = np.zeros((total_frames,), dtype=np.float32)
+    for ci in range(n_chunks):
+      f0 = int(round(float(chunk_starts[ci]) / frame_dt))
+      f1 = min(total_frames, f0 + n_frames)
+      ln = f1 - f0
+      if ln <= 0:
+        continue
+      loc_p = ml_f[ci, :ln, :]
+      wt = w_chunk[:ln]
+      active_locals = [
+          s for s in (0, 1, 2) if float(loc_p[:, s].sum()) > 0.5
+      ]
+      if not active_locals:
+        cur_den[f0:f1] += wt
+        continue
+
+      score = np.full((3, n_k), -1e3, dtype=np.float32)
+      has_emb = [False, False, False]
+      for r_idx in chunk_to_rows.get(ci, []):
+        sl = int(round(float(cs_meta[r_idx, 1])))
+        dur_c = float(cs_meta[r_idx, 2])
+        sim_vec = embs_n[r_idx] @ cents_n.T
+        score[sl, :] = sim_vec * min(1.0, max(0.3, dur_c))
+        has_emb[sl] = True
+
+      if use_temporal_stitch and pass_idx == 1:
+        prev_den = np.maximum(probs_den[f0:f1], 1e-6)
+        prev_p = probs_num[f0:f1] / prev_den[:, None]
+        ov_corr = loc_p.T @ prev_p
+        loc_mass = np.maximum(loc_p.sum(axis=0, keepdims=True).T, 1e-4)
+        ov_norm = ov_corr / loc_mass
+        for s in active_locals:
+          if has_emb[s]:
+            score[s, :] = score[s, :] + float(stitch_weight) * ov_norm[s, :]
+          else:
+            score[s, :] = ov_norm[s, :]
+      elif pass_idx == 0:
+        for s in active_locals:
+          if not has_emb[s]:
+            if float(cur_den[f0:f1].max()) > 0.0:
+              cur_p = cur_num[f0:f1] / np.maximum(cur_den[f0:f1, None], 1e-6)
+              ov_c = loc_p[:, s] @ cur_p
+              score[s, :] = ov_c / max(1e-4, float(loc_p[:, s].sum()))
+            else:
+              score[s, :] = 0.0
+
+      if len(active_locals) <= n_k:
+        sub = score[active_locals, :]
+        ri, gi = optimize.linear_sum_assignment(sub, maximize=True)
+        for r_l, g_k in zip(ri, gi):
+          sl = active_locals[int(r_l)]
+          if (
+              pass_idx == 0
+              and (not has_emb[sl])
+              and float(cur_den[f0:f1].max()) == 0.0
+          ):
+            continue
+          cur_num[f0:f1, int(g_k)] += loc_p[:, sl] * wt
+      else:
+        for sl in active_locals:
+          gk = int(np.argmax(score[sl]))
+          cur_num[f0:f1, gk] += loc_p[:, sl] * wt
+      cur_den[f0:f1] += wt
+    probs_num, probs_den = cur_num, cur_den
+
+  global_p = probs_num / np.maximum(probs_den[:, None], 1e-6)
+  if prob_smooth_sec > 0.0:
+    sig = max(0.5, float(prob_smooth_sec) / frame_dt)
+    global_p = gaussian_filter(global_p, sigma=(sig, 0.0))
+  return global_p.astype(np.float32), frame_dt
+
+
+def probs_to_speaker_turns(
+    frame_probs: np.ndarray,
+    frame_dt: float,
+    duration_sec: float,
+    min_active_prob: float = 0.05,
+) -> List[types.SpeakerTurn]:
+  """Converts continuous `(T, K)` frame probs into contiguous SpeakerTurns."""
+  probs = np.asarray(frame_probs, dtype=np.float32)
+  if probs.ndim != 2 or probs.shape[0] == 0 or probs.shape[1] == 0:
+    return []
+  max_p = probs.max(axis=1)
+  top_k = probs.argmax(axis=1)
+  n_frames = min(
+      probs.shape[0],
+      max(1, int(math.ceil(float(duration_sec) / max(1e-6, frame_dt)))),
+  )
+  turns: List[types.SpeakerTurn] = []
+  cur_spk: Optional[str] = None
+  cur_start = 0.0
+  for fi in range(n_frames):
+    if float(max_p[fi]) <= min_active_prob:
+      if cur_spk is not None:
+        t_end = min(float(duration_sec), fi * frame_dt)
+        if t_end > cur_start:
+          turns.append(
+              types.SpeakerTurn(start=cur_start, end=t_end, speaker=cur_spk)
+          )
+        cur_spk = None
+      continue
+    spk_str = str(int(top_k[fi]) + 1)
+    if cur_spk is None:
+      cur_spk = spk_str
+      cur_start = fi * frame_dt
+    elif spk_str != cur_spk:
+      t_mid = min(float(duration_sec), fi * frame_dt)
+      if t_mid > cur_start:
+        turns.append(
+            types.SpeakerTurn(start=cur_start, end=t_mid, speaker=cur_spk)
+        )
+      cur_spk = spk_str
+      cur_start = t_mid
+  if cur_spk is not None:
+    t_end = min(float(duration_sec), n_frames * frame_dt)
+    if t_end > cur_start:
+      turns.append(
+          types.SpeakerTurn(start=cur_start, end=t_end, speaker=cur_spk)
+      )
+  if not turns and duration_sec > 0.0:
+    turns.append(
+        types.SpeakerTurn(start=0.0, end=float(duration_sec), speaker="1")
+    )
+  return turns
 
 
 def load_audio_16k(
@@ -735,16 +937,31 @@ class ECAPASpectralDiarizer:
         gaussian_blur_sigma=preset.gaussian_blur_sigma,
         eigen_threshold=preset.eigen_threshold,
     )
+    self.last_frame_probs: Optional[np.ndarray] = None
+    self.last_frame_dt: float = 10.0 / 295.0
 
   @property
   def segmentation_model(self) -> Optional[Any]:
     return self._seg_mod or self.segmentation_model_spec
 
+  @staticmethod
+  def _is_flaxspeaker(encoder: Any) -> bool:
+    return bool(getattr(encoder, "is_flaxspeaker_encoder", False))
+
   def _ensure_encoder(self) -> Any:
     if self.encoder is None:
-      self.encoder = SpeechBrainECAPATDNN.from_pretrained(
-          self.preset.encoder_name, device=self.device
-      )
+      if flaxspeaker_encoder.is_flaxspeaker_model_id(
+          self.preset.encoder_name
+      ):
+        self.encoder = (
+            flaxspeaker_encoder.FlaxSpeakerERes2Conformer.from_pretrained(
+                self.preset.encoder_name, device=self.device
+            )
+        )
+      else:
+        self.encoder = SpeechBrainECAPATDNN.from_pretrained(
+            self.preset.encoder_name, device=self.device
+        )
     return self.encoder
 
   def _ensure_segmentation_model(self) -> Optional[Any]:
@@ -868,19 +1085,334 @@ class ECAPASpectralDiarizer:
     boundaries.append(max_t)
     return boundaries
 
+  def extract_overlapping_powerset(
+      self,
+      waveform: np.ndarray,
+      sample_rate: int = 16000,
+      step_sec: Optional[float] = None,
+  ) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    """Runs overlapping 10s PyanNet windows for powerset diarization."""
+    if waveform.size == 0 or torch is None:
+      return None
+    seg_mod = self._ensure_segmentation_model()
+    if seg_mod is None:
+      return None
+
+    step_s = (
+        float(step_sec)
+        if step_sec is not None
+        else float(getattr(self.preset, "seg_step_sec", 2.5))
+    )
+    win_samp = 10 * sample_rate
+    step_samp = max(1, int(round(step_s * sample_rate)))
+    n_samp = len(waveform)
+    starts = list(range(0, max(1, n_samp - win_samp + 1), step_samp))
+    if n_samp > win_samp and (n_samp - (starts[-1] + win_samp)) >= sample_rate:
+      starts.append(max(0, n_samp - win_samp))
+    if not starts:
+      starts = [0]
+
+    chunks: List[np.ndarray] = []
+    for s in starts:
+      c = waveform[s:s + win_samp]
+      if len(c) < win_samp:
+        c = np.pad(c, (0, win_samp - len(c)))
+      chunks.append(np.asarray(c, dtype=np.float32))
+
+    argmax_list: List[np.ndarray] = []
+    soft_list: List[np.ndarray] = []
+    with torch.no_grad():
+      for i0 in range(0, len(chunks), self.batch_size):
+        arr = np.stack(chunks[i0:i0 + self.batch_size], axis=0)
+        b_t = torch.from_numpy(arr).to(self.device)
+        lp = seg_mod(b_t)
+        cls_arg = torch.argmax(lp, dim=-1).cpu().numpy().astype(np.uint8)
+        if hasattr(seg_mod, "to_multilabel"):
+          ml = seg_mod.to_multilabel(lp, soft=True).cpu().numpy()
+        else:
+          ml = powerset_probs_to_multilabel(torch.exp(lp).cpu().numpy())
+        argmax_list.append(cls_arg)
+        soft_list.append(ml[:, ::2, :].astype(np.float32))
+
+    chunk_starts = np.array(
+        [s / float(sample_rate) for s in starts], dtype=np.float32
+    )
+    return (
+        chunk_starts,
+        np.concatenate(argmax_list, axis=0),
+        np.concatenate(soft_list, axis=0),
+    )
+
+  def _encode_variable_tracks(
+      self,
+      encoder: Any,
+      tracks: List[np.ndarray],
+  ) -> np.ndarray:
+    """Batch-encodes variable-length clean `(T_i, 80)` tracks."""
+    if not tracks:
+      return np.zeros((0, 192), dtype=np.float32)
+    is_fs = self._is_flaxspeaker(encoder)
+    order = sorted(range(len(tracks)), key=lambda i: tracks[i].shape[0])
+    out_list: List[Optional[np.ndarray]] = [None] * len(tracks)
+    bs = 32 if is_fs else min(64, self.batch_size)
+    with torch.no_grad():
+      for pos in range(0, len(order), bs):
+        b_idx = order[pos:pos + bs]
+        lengths = [tracks[i].shape[0] for i in b_idx]
+        max_t = max(lengths)
+        if is_fs:
+          arr = np.zeros((len(b_idx), max_t, tracks[b_idx[0]].shape[1]),
+                         dtype=np.float32)
+          msk = np.zeros((len(b_idx), max_t), dtype=np.float32)
+          for row, i in enumerate(b_idx):
+            tl = tracks[i].shape[0]
+            arr[row, :tl] = tracks[i]
+            msk[row, :tl] = 1.0
+          x_t = torch.from_numpy(arr).to(self.device)
+          m_t = torch.from_numpy(msk).to(self.device)
+          embs = encoder(x_t, mask=m_t).cpu().numpy()
+          for row, i in enumerate(b_idx):
+            out_list[i] = embs[row]
+        elif max_t - min(lengths) > 25:
+          for i in b_idx:
+            x_t = torch.from_numpy(tracks[i]).unsqueeze(0).to(self.device)
+            raw = encoder(x_t)
+            if isinstance(raw, torch.Tensor):
+              emb = F.normalize(raw, p=2, dim=1).cpu().numpy()[0]
+            else:
+              emb = spectral.l2_normalize_rows(
+                  np.asarray(raw, dtype=np.float32)
+              )[0]
+            out_list[i] = emb
+        else:
+          feat_d = tracks[b_idx[0]].shape[1]
+          arr = np.zeros((len(b_idx), max_t, feat_d), dtype=np.float32)
+          for row, i in enumerate(b_idx):
+            tl = tracks[i].shape[0]
+            arr[row, :tl] = tracks[i]
+            if tl < max_t:
+              reps = (max_t - tl + tl - 1) // tl
+              pad_src = np.tile(tracks[i], (reps, 1))[:max_t - tl]
+              arr[row, tl:] = pad_src
+          x_t = torch.from_numpy(arr).to(self.device)
+          raw = encoder(x_t)
+          if isinstance(raw, torch.Tensor):
+            embs = F.normalize(raw, p=2, dim=1).cpu().numpy()
+          else:
+            embs = spectral.l2_normalize_rows(
+                np.asarray(raw, dtype=np.float32)
+            )
+          for row, i in enumerate(b_idx):
+            out_list[i] = embs[row]
+    stacked = np.stack([e for e in out_list if e is not None], axis=0)
+    return spectral.l2_normalize_rows(stacked)
+
+  def _run_powerset_ward(
+      self,
+      waveform: np.ndarray,
+      sample_rate: int = 16000,
+      num_speakers: Optional[int] = None,
+      min_speakers: Optional[int] = None,
+      max_speakers: Optional[int] = None,
+  ) -> Optional[List[types.SpeakerTurn]]:
+    """Runs overlapping powerset-masked track diarization + Ward + EM."""
+    ps_res = self.extract_overlapping_powerset(
+        waveform, sample_rate=sample_rate
+    )
+    if ps_res is None:
+      return None
+    chunk_starts, ps_argmax, ml_soft_ds = ps_res
+    n_seg_frames = ps_argmax.shape[1]
+    if len(chunk_starts) == 0 or n_seg_frames == 0:
+      return None
+
+    encoder = self._ensure_encoder()
+    is_fs = self._is_flaxspeaker(encoder)
+    if is_fs:
+      fb_raw = flaxspeaker_encoder.compute_flaxspeaker_log_mel(
+          waveform, sample_rate=sample_rate, apply_agc=True, apply_cmvn=False
+      )
+    else:
+      fb_raw_t = compute_log_mel_fbank(
+          waveform, sample_rate=sample_rate, apply_cmvn=True
+      )
+      fb_raw = (
+          fb_raw_t.numpy()
+          if hasattr(fb_raw_t, "numpy")
+          else np.asarray(fb_raw_t, dtype=np.float32)
+      )
+
+    n_fb = int(fb_raw.shape[0])
+    frame_dt_full = 10.0 / float(n_seg_frames)
+    if is_fs:
+      active_10ms = np.zeros(n_fb, dtype=bool)
+      for ci, cs_sec in enumerate(chunk_starts):
+        f0 = int(round(float(cs_sec) * 100.0))
+        f1 = min(n_fb, f0 + 1000)
+        if f1 <= f0:
+          continue
+        t_rel = np.arange(f1 - f0, dtype=np.float32) * 0.01
+        seg_i = np.clip(
+            (t_rel / frame_dt_full).astype(np.int32), 0, n_seg_frames - 1
+        )
+        active_10ms[f0:f1] |= ps_argmax[ci, seg_i] > 0
+      if int(active_10ms.sum()) >= 50:
+        rec_mean = np.mean(fb_raw[active_10ms], axis=0, keepdims=True)
+      else:
+        rec_mean = np.mean(fb_raw, axis=0, keepdims=True)
+      fb_rec = (fb_raw - rec_mean).astype(np.float32)
+    else:
+      fb_rec = np.asarray(fb_raw, dtype=np.float32)
+
+    min_ext_sec = float(getattr(self.preset, "min_extract_sec", 0.4))
+    min_ext_frames = max(20, int(round(min_ext_sec * 100.0)))
+    tracks: List[np.ndarray] = []
+    cs_meta_list: List[List[float]] = []
+    for ci, cs_sec in enumerate(chunk_starts):
+      f0 = int(round(float(cs_sec) * 100.0))
+      f1 = min(n_fb, f0 + 1000)
+      if f1 - f0 < min_ext_frames:
+        continue
+      t_rel = np.arange(f1 - f0, dtype=np.float32) * 0.01
+      seg_i = np.clip(
+          (t_rel / frame_dt_full).astype(np.int32), 0, n_seg_frames - 1
+      )
+      cls_10ms = ps_argmax[ci, seg_i]
+      fb_chunk = fb_rec[f0:f1]
+      for s_local in (0, 1, 2):
+        mask_clean = cls_10ms == (s_local + 1)
+        n_clean = int(mask_clean.sum())
+        if n_clean < min_ext_frames:
+          continue
+        tracks.append(fb_chunk[mask_clean].astype(np.float32))
+        cs_meta_list.append([float(ci), float(s_local), n_clean * 0.01])
+
+    if not tracks:
+      return None
+
+    cs_meta = np.asarray(cs_meta_list, dtype=np.float32)
+    emb_all = self._encode_variable_tracks(encoder, tracks)
+    durs = cs_meta[:, 2]
+    lo_k = (
+        int(num_speakers)
+        if num_speakers is not None
+        else int(
+            min_speakers
+            if min_speakers is not None
+            else self.preset.min_clusters
+        )
+    )
+    hi_k = (
+        int(num_speakers)
+        if num_speakers is not None
+        else int(
+            max_speakers
+            if max_speakers is not None
+            else self.preset.max_clusters
+        )
+    )
+    min_clean_sec = float(getattr(self.preset, "min_clean_sec", 1.0))
+    use_mask = durs >= min_clean_sec
+    if int(use_mask.sum()) < max(lo_k, 6):
+      order = np.argsort(-durs)
+      use_mask = np.zeros_like(durs, dtype=bool)
+      keep_n = min(len(durs), max(lo_k * 2, 6))
+      use_mask[order[:keep_n]] = True
+
+    sel_emb = emb_all[use_mask]
+    sel_dur = durs[use_mask]
+    sel_cids = np.round(cs_meta[use_mask, 0]).astype(np.int32)
+    merge_thr = float(
+        getattr(
+            self.preset,
+            "ward_merge_threshold",
+            0.70 if is_fs else 0.60,
+        )
+    )
+    raw_min_spk_sec = float(getattr(self.preset, "min_cluster_sec", 8.0))
+    min_spk_sec = min(raw_min_spk_sec, 0.08 * float(np.sum(sel_dur)))
+    labels = spectral.ward_cluster_auto_k(
+        sel_emb,
+        min_clusters=lo_k,
+        max_clusters=hi_k,
+        merge_threshold=merge_thr,
+        min_cluster_weight=min_spk_sec,
+        weights=sel_dur,
+        num_clusters=num_speakers,
+    )
+    em_iters = int(getattr(self.preset, "em_iters", 5))
+    if len(set(labels.tolist())) > 1 and em_iters > 0:
+      labels = spectral.refine_cosine_em(
+          sel_emb,
+          labels,
+          weights=sel_dur,
+          chunk_ids=sel_cids,
+          n_iters=em_iters,
+          enforce_cannot_link=True,
+      )
+
+    emb_c = emb_all
+    sel_c = sel_emb
+    bal_beta = float(getattr(self.preset, "balanced_centering_beta", 1.0))
+    if bal_beta > 0.0 and len(set(labels.tolist())) >= 2:
+      emb_c = spectral.balance_center_embeddings(
+          emb_all, sel_emb, labels, weights=sel_dur, beta=bal_beta
+      )
+      sel_c = emb_c[use_mask]
+      labels = spectral.refine_cosine_em(
+          sel_c,
+          labels,
+          weights=sel_dur,
+          chunk_ids=sel_cids,
+          n_iters=3,
+          enforce_cannot_link=True,
+      )
+
+    cents, _ = spectral.compute_weighted_centroids(
+        sel_c, labels, weights=sel_dur
+    )
+    dur_sec = float(len(waveform)) / float(sample_rate)
+    global_p, frame_dt = stitch_powerset_probs(
+        chunk_starts=chunk_starts,
+        ml_soft=ml_soft_ds,
+        cs_meta=cs_meta,
+        cs_embs_all=emb_c,
+        centroids=cents,
+        duration_sec=dur_sec,
+        chunk_window_weight=str(
+            getattr(self.preset, "chunk_window_weight", "uniform")
+        ),
+        use_temporal_stitch=True,
+        stitch_weight=float(getattr(self.preset, "stitch_weight", 0.50)),
+        prob_smooth_sec=float(getattr(self.preset, "prob_smooth_sec", 0.25)),
+    )
+    self.last_frame_probs = global_p
+    self.last_frame_dt = frame_dt
+    return probs_to_speaker_turns(global_p, frame_dt, dur_sec)
+
   def extract_window_embeddings(
       self,
       waveform: np.ndarray,
       sample_rate: int = 16000,
   ) -> Tuple[np.ndarray, List[Tuple[float, float]]]:
     """Extracts L2-normalized sliding-window speaker embeddings."""
-    fbank = compute_log_mel_fbank(waveform, sample_rate=sample_rate)
+    encoder = self._ensure_encoder()
+    is_fs = self._is_flaxspeaker(encoder)
+    if is_fs:
+      fbank_raw = flaxspeaker_encoder.compute_flaxspeaker_log_mel(
+          waveform, sample_rate=sample_rate, apply_agc=True, apply_cmvn=True
+      )
+      fbank = (
+          torch.from_numpy(fbank_raw) if torch is not None else fbank_raw
+      )
+    else:
+      fbank = compute_log_mel_fbank(waveform, sample_rate=sample_rate)
     num_frames = int(fbank.shape[0])
     win = self.preset.window_frames
     step = self.preset.step_frames
 
     if num_frames <= 0:
-      return np.zeros((0, 192), dtype=np.float32), []
+      return np.zeros((0, 256 if is_fs else 192), dtype=np.float32), []
 
     if num_frames <= win:
       chunks = [fbank]
@@ -898,7 +1430,6 @@ class ECAPASpectralDiarizer:
         chunks.append(fbank[tail_s:num_frames])
         times.append((tail_s * 0.01, num_frames * 0.01))
 
-    encoder = self._ensure_encoder()
     if torch is not None and isinstance(chunks[0], torch.Tensor):
       batch_tensor = torch.stack(chunks, dim=0).to(self.device)
       embs_list: List[np.ndarray] = []
@@ -937,9 +1468,23 @@ class ECAPASpectralDiarizer:
       max_speakers: Optional[int] = None,
   ) -> List[types.SpeakerTurn]:
     """Runs speaker diarization and returns contiguous SpeakerTurns."""
+    self.last_frame_probs = None
     wav = load_audio_16k(audio_input, target_sr=16000)
     if wav.size == 0:
       return []
+
+    mode = str(getattr(self.preset, "diarization_mode", "powerset_ward"))
+    if mode == "powerset_ward" and self.segmentation_fn is None:
+      ps_turns = self._run_powerset_ward(
+          wav,
+          sample_rate=16000,
+          num_speakers=num_speakers,
+          min_speakers=min_speakers,
+          max_speakers=max_speakers,
+      )
+      if ps_turns is not None:
+        return ps_turns
+
     embs, times = self.extract_window_embeddings(wav, sample_rate=16000)
     if len(embs) == 0:
       return []

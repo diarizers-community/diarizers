@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Diarizers v1.0.1 — End-to-End Audio ASR + Speaker Diarization + DiarizationLM Demo</title>
+  <title>Diarizers v1.1.0 — End-to-End Audio ASR + Speaker Diarization + DiarizationLM Demo</title>
   <style>
     :root {
       --bg: #f8fafc;
@@ -252,17 +252,18 @@
 <body>
   <div class="container">
     <div class="header">
-      <h1>🎙️ Diarizers v1.0.1 — End-to-End Audio ASR, Speaker Diarization &amp; DiarizationLM</h1>
+      <h1>🎙️ Diarizers v1.1.0 — End-to-End Audio ASR, Speaker Diarization &amp; DiarizationLM</h1>
       <p>
         End-to-end open-source (Apache-2.0 / MIT) pipeline combining <b>Stage 1: Whisper ASR</b> (<code>WhisperWordASR</code>),
-        <b>Stage 2: Neural Speaker Segmentation + Embeddings + Spectral Clustering</b> (<code>pyannote/segmentation-3.0</code> + <code>speechbrain/spkrec-ecapa-voxceleb</code> + Symmetric Normalized Laplacian <code>SpectralClusterer</code>),
-        <b>Stage 3: Word-to-Turn Alignment</b>, and
-        <b>Stage 4: DiarizationLM-Gemma-4-E4B-v1 Post-Processing</b> (<code>Q4_K_M</code> GGUF + Locality-Gated Transcript-Preserving Speaker Transfer <code>LG-TPST</code>).
+        <b>Stage 2: Powerset-Masked Speaker Segmentation + ECAPA / FlaxSpeaker Embeddings + Auto-K Clustering</b> (<code>pyannote/segmentation-3.0</code> + <code>speechbrain/spkrec-ecapa-voxceleb</code> or <code>wq2012/univ_full_eres2conformer_xl</code> + <code>powerset_ward</code>),
+        <b>Stage 3: Soft Posterior Word Alignment</b>, and
+        <b>Stage 4: Multilingual DiarizationLM Post-Processing</b> (<code>DiarizationLM-Gemma-4-12B-v1</code> in <code>best-quality</code>/<code>max</code> or <code>DiarizationLM-Gemma-4-E4B-v2</code> in <code>fast</code> + <code>LG-TPST</code>).
       </p>
       <div class="badges">
         <a class="badge-link" href="https://github.com/diarizers-community/diarizers" target="_blank">💻 GitHub (diarizers-community/diarizers)</a>
-        <a class="badge-link" href="https://pypi.org/project/diarizers/1.0.1/" target="_blank">📦 PyPI (pip install diarizers==1.0.1)</a>
-        <a class="badge-link" href="https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v1" target="_blank">🤗 Model: DiarizationLM-Gemma-4-E4B-v1</a>
+        <a class="badge-link" href="https://pypi.org/project/diarizers/" target="_blank">📦 PyPI (pip install -U diarizers)</a>
+        <a class="badge-link" href="https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-12B-v1" target="_blank">🤗 Best Quality: Gemma-4-12B-v1</a>
+        <a class="badge-link" href="https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v2" target="_blank">⚡ Fast CPU: Gemma-4-E4B-v2</a>
         <a class="badge-link" href="https://huggingface.co/spaces/diarizers-community/DiarizationLM-GGUF" target="_blank">💬 Text-Only DiarizationLM-GGUF Demo</a>
         <a class="badge-link" href="https://arxiv.org/abs/2401.03506" target="_blank">📄 DiarizationLM Paper (arXiv:2401.03506)</a>
       </div>
@@ -281,7 +282,18 @@
         </div>
 
         <div class="field">
-          <label for="asrSelect">2. Stage 1 — Whisper ASR Model</label>
+          <label for="profileSelect">2. Pipeline Quality / Speed Profile (<code>--profile</code>)</label>
+          <div class="hint">Switch instantly on built-in examples to compare 12B-v1, FlaxSpeaker-XL, E4B-v2, and Acoustic-Only.</div>
+          <select id="profileSelect">
+            <option value="best-quality">best-quality — ECAPA + Gemma-4-12B-v1 (3.88% WDER, Default)</option>
+            <option value="max">max — FlaxSpeaker-XL + Gemma-4-12B-v1 (3.49% CALLHOME / 6.33% ICSI)</option>
+            <option value="fast">fast — ECAPA + Gemma-4-E4B-v2 (4.13% WDER, 2x faster, ~7.6 GiB RAM)</option>
+            <option value="acoustic-only">acoustic-only — ECAPA powerset_ward (5.65% WDER, &lt;2 GiB RAM, no LLM)</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="asrSelect">3. Stage 1 — Whisper ASR Model</label>
           <select id="asrSelect">
             <option value="openai/whisper-base.en">openai/whisper-base.en (Fast CPU Default)</option>
             <option value="openai/whisper-small.en">openai/whisper-small.en (Balanced CPU)</option>
@@ -290,23 +302,25 @@
         </div>
 
         <div class="field">
-          <label for="presetSelect">3. Stage 2 — Acoustic Diarization Preset</label>
+          <label for="presetSelect">4. Stage 2 — Acoustic Diarization Preset</label>
           <select id="presetSelect">
+            <option value="Universal Auto (ECAPA powerset_ward)">Universal Auto (ECAPA powerset_ward, Auto 1..10)</option>
+            <option value="FlaxSpeaker-XL Auto (powerset_ward)">FlaxSpeaker-XL Auto (SimAM-ERes2Conformer powerset_ward)</option>
             <option value="Fisher Telephony (2 speakers)">Fisher Telephony (2 speakers, K=2)</option>
-            <option value="Callhome Telephony (2-6 speakers)">Callhome Telephony (Auto [2..6], eigen_threshold=0.45)</option>
-            <option value="AMI Meeting (3-5 speakers)">AMI Meeting (Auto [3..5], eigen_threshold=0.45)</option>
-            <option value="Meeting Multi-Speaker (2-10 speakers)">Meeting Multi-Speaker (Auto [2..10], eigen_threshold=0.45)</option>
+            <option value="Callhome Telephony (2-6 speakers)">Callhome Telephony (Auto [2..6])</option>
+            <option value="AMI Meeting (3-5 speakers)">AMI Meeting (Auto [3..5])</option>
+            <option value="Meeting Multi-Speaker (2-10 speakers)">Meeting Multi-Speaker (Auto [2..10])</option>
           </select>
         </div>
 
         <div class="field">
-          <label for="numSpkRange">4. Known Speaker Count (<span id="numSpkVal">2</span>; 0 = Auto-detect via Laplacian Eigengap)</label>
+          <label for="numSpkRange">5. Known Speaker Count (<span id="numSpkVal">2</span>; 0 = Auto-detect)</label>
           <input type="range" id="numSpkRange" min="0" max="8" step="1" value="2" />
         </div>
 
         <div class="checkbox-row">
           <input type="checkbox" id="useLlmCheck" checked />
-          <label for="useLlmCheck">Stage 4: Enable <code>DiarizationLM-Gemma-4-E4B-v1</code> Boundary Refinement</label>
+          <label for="useLlmCheck">Stage 4: Enable <code>DiarizationLM</code> Boundary Refinement (<code>12B-v1</code> / <code>E4B-v2</code>)</label>
         </div>
 
         <div class="checkbox-row">
@@ -324,12 +338,12 @@
         <div class="status-bar" id="statusBar">Loading built-in conversation examples...</div>
 
         <div class="field">
-          <label>Before DiarizationLM (Acoustic Baseline: Whisper + PyanNet + ECAPA-TDNN + SpectralClusterer)</label>
+          <label>Before DiarizationLM (Acoustic Baseline: Whisper + PyanNet Powerset + ECAPA / FlaxSpeaker)</label>
           <div class="result-box before" id="beforeBox"></div>
         </div>
 
         <div class="field">
-          <label>After DiarizationLM-Gemma-4-E4B-v1 (Refined Transcript — relabeled boundary words highlighted in green)</label>
+          <label>After DiarizationLM (Refined Transcript — relabeled boundary words highlighted in green)</label>
           <div class="result-box after" id="afterBox"></div>
         </div>
 
@@ -369,6 +383,7 @@
 
     const audioFileInput = document.getElementById("audioFileInput");
     const inputAudioPlayer = document.getElementById("inputAudioPlayer");
+    const profileSelect = document.getElementById("profileSelect");
     const asrSelect = document.getElementById("asrSelect");
     const presetSelect = document.getElementById("presetSelect");
     const numSpkRange = document.getElementById("numSpkRange");
@@ -384,6 +399,12 @@
     const examplesTableBody = document.getElementById("examplesTableBody");
 
     const PRESET_CONFIGS = {
+      "Universal Auto (ECAPA powerset_ward)": {
+        winSec: 2.0, stepSec: 0.8, minK: 2, maxK: 8, pPct: 75, sigma: 1.5, eigenThreshold: 0.45
+      },
+      "FlaxSpeaker-XL Auto (powerset_ward)": {
+        winSec: 2.0, stepSec: 0.8, minK: 2, maxK: 8, pPct: 75, sigma: 1.5, eigenThreshold: 0.45
+      },
       "Fisher Telephony (2 speakers)": {
         winSec: 1.2, stepSec: 0.4, minK: 2, maxK: 2, pPct: 85, sigma: 1.5, eigenThreshold: 0.45
       },
@@ -788,24 +809,31 @@
     }
 
     function renderBuiltinExample(ex) {
-      const useLlm = useLlmCheck.checked;
+      const profKey = profileSelect.value || ex.default_profile || "best-quality";
+      const pData = (ex.profiles && ex.profiles[profKey]) || ex;
+      const useLlm = (profKey !== "acoustic-only") && useLlmCheck.checked;
       const useLg = useLgCheck.checked;
-      const words = ex.words.map((w) => w.word);
-      const acSpks = ex.words.map((w) => w.acoustic_speaker);
-      const rawLlmSpks = ex.words.map((w) => w.raw_llm_speaker || w.llm_speaker);
-      const lgSpks = applyLocalityGatedSpeakerTransferJS(acSpks, rawLlmSpks, 5, 15, 15);
+      const words = pData.words.map((w) => w.word);
+      const acSpks = pData.words.map((w) => w.acoustic_speaker);
+      const rawLlmSpks = pData.words.map((w) => w.raw_llm_speaker || w.llm_speaker);
+      const lgSpks = pData.words.map((w) => w.llm_speaker || w.raw_llm_speaker);
       const activeSpks = !useLlm ? acSpks : (useLg ? lgSpks : rawLlmSpks);
       const changed = acSpks.reduce((acc, s, i) => acc + (s !== activeSpks[i] ? 1 : 0), 0);
+      const effTotal = (
+        parseFloat(pData.timings.asr_sec) +
+        parseFloat(pData.timings.diar_sec) +
+        (useLlm ? parseFloat(pData.timings.llm_sec) : 0.0)
+      ).toFixed(2);
 
       statusBar.textContent =
-        `Completed in ${ex.timings.total_sec}s (ASR: ${ex.timings.asr_sec}s, ` +
-        `Diarization: ${ex.timings.diar_sec}s, DiarizationLM: ${useLlm ? ex.timings.llm_sec + "s" : "disabled"}) | ` +
-        `Words: ${ex.word_count} | Speakers: ${new Set(activeSpks).size} | ` +
-        `Words relabeled by DiarizationLM: ${changed}/${ex.word_count} | Mode: ${!useLlm ? "Acoustic Only" : (useLg ? "LG-TPST" : "Raw-TPST")}`;
+        `Completed in ${effTotal}s (ASR: ${pData.timings.asr_sec}s, ` +
+        `Diarization: ${pData.timings.diar_sec}s, DiarizationLM: ${useLlm ? pData.timings.llm_sec + "s" : "disabled"}) | ` +
+        `Profile: ${profKey} | Words: ${ex.word_count} | Speakers: ${new Set(activeSpks).size} | ` +
+        `Relabeled: ${changed}/${ex.word_count} | Mode: ${!useLlm ? "Acoustic Only" : (useLg ? "LG-TPST" : "Raw-TPST")}`;
 
       beforeBox.innerHTML = renderDiarizedHtml(words, acSpks);
       afterBox.innerHTML = renderDiarizedHtml(words, activeSpks, acSpks);
-      const built = buildRttmAndSrt(ex.words, activeSpks, ex.id || "recording");
+      const built = buildRttmAndSrt(pData.words, activeSpks, ex.id || "recording");
       rttmBox.textContent = built.rttm;
       srtBox.textContent = built.srt;
     }
@@ -1174,43 +1202,50 @@
       });
     }
 
-    async function queryRemoteDiarizationLM(promptText, timeoutMs = 15000) {
+    async function queryRemoteDiarizationLM(promptText, profileKey = "fast", timeoutMs = 25000) {
       const baseUrl = "https://diarizers-community-diarizationlm-gguf.hf.space";
+      const llmChoice = profileKey === "fast" ? "fast" : "best-quality";
+      const payloads = [
+        { data: [promptText, llmChoice] },
+        { data: [promptText] }
+      ];
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), timeoutMs);
       try {
-        for (const callPath of ["/gradio_api/call/predict", "/call/predict"]) {
-          const postResp = await fetch(`${baseUrl}${callPath}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ data: [promptText] }),
-            signal: ctrl.signal
-          });
-          if (!postResp.ok) continue;
-          const postJson = await postResp.json();
-          const eventId = postJson && postJson.event_id;
-          if (!eventId) continue;
+        for (const bodyObj of payloads) {
+          for (const callPath of ["/gradio_api/call/predict", "/call/predict"]) {
+            const postResp = await fetch(`${baseUrl}${callPath}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(bodyObj),
+              signal: ctrl.signal
+            });
+            if (!postResp.ok) continue;
+            const postJson = await postResp.json();
+            const eventId = postJson && postJson.event_id;
+            if (!eventId) continue;
 
-          const sseResp = await fetch(`${baseUrl}${callPath}/${eventId}`, {
-            method: "GET",
-            signal: ctrl.signal
-          });
-          if (!sseResp.ok) continue;
-          const sseText = await sseResp.text();
-          let lastDataStr = null;
-          for (const line of sseText.split("\n")) {
-            if (line.startsWith("data:")) {
-              const payload = line.slice(5).trim();
-              if (!payload || payload === "null") continue;
-              try {
-                const arr = JSON.parse(payload);
-                if (Array.isArray(arr) && typeof arr[0] === "string" && arr[0].trim()) {
-                  lastDataStr = arr[0];
-                }
-              } catch (_) {}
+            const sseResp = await fetch(`${baseUrl}${callPath}/${eventId}`, {
+              method: "GET",
+              signal: ctrl.signal
+            });
+            if (!sseResp.ok) continue;
+            const sseText = await sseResp.text();
+            let lastDataStr = null;
+            for (const line of sseText.split("\n")) {
+              if (line.startsWith("data:")) {
+                const payload = line.slice(5).trim();
+                if (!payload || payload === "null") continue;
+                try {
+                  const arr = JSON.parse(payload);
+                  if (Array.isArray(arr) && typeof arr[0] === "string" && arr[0].trim()) {
+                    lastDataStr = arr[0];
+                  }
+                } catch (_) {}
+              }
             }
+            if (lastDataStr) return lastDataStr;
           }
-          if (lastDataStr) return lastDataStr;
         }
         const legacyResp = await fetch(`${baseUrl}/api/predict`, {
           method: "POST",
@@ -1232,7 +1267,8 @@
 
     function renderLiveResult(res) {
       if (!res) return;
-      const useLlm = useLlmCheck.checked;
+      const profKey = profileSelect.value || "best-quality";
+      const useLlm = (profKey !== "acoustic-only") && useLlmCheck.checked;
       const useLg = useLgCheck.checked;
       const { wordObjs, words, acSpks, rawLlmSpks, tAsr, tDiar, tLlm, reqNumSpk } = res;
       const lgSpks = applyLocalityGatedSpeakerTransferJS(acSpks, rawLlmSpks, 5, 15, 15);
@@ -1247,21 +1283,22 @@
       rttmBox.textContent = rttm;
       srtBox.textContent = srt;
       statusBar.textContent =
-        `Completed in ${totalSec}s (ASR: ${tAsr}s, SpectralClusterer: ${tDiar}s, ` +
-        `DiarizationLM: ${useLlm ? tLlm + "s" : "disabled"}) | Words: ${words.length} | ` +
-        `Speakers: ${new Set(activeSpks).size} (req=${reqNumSpk === 0 ? "Auto Eigengap" : reqNumSpk}) | ` +
-        `Words relabeled: ${changed}/${words.length} | Mode: ${!useLlm ? "Acoustic Only" : (useLg ? "LG-TPST" : "Raw-TPST")}`;
+        `Completed in ${totalSec}s (ASR: ${tAsr}s, Diarization: ${tDiar}s, ` +
+        `DiarizationLM: ${useLlm ? tLlm + "s" : "disabled"}) | Profile: ${profKey} | Words: ${words.length} | ` +
+        `Speakers: ${new Set(activeSpks).size} (req=${reqNumSpk === 0 ? "Auto" : reqNumSpk}) | ` +
+        `Relabeled: ${changed}/${words.length} | Mode: ${!useLlm ? "Acoustic Only" : (useLg ? "LG-TPST" : "Raw-TPST")}`;
     }
 
     async function runLiveBrowserPipeline(fileOrUrl, precomputedWords = null) {
       runBtn.disabled = true;
       try {
+        const profKey = profileSelect.value || "best-quality";
         const selectedAsr = asrSelect.value;
         const browserModelId = ASR_MODEL_MAP[selectedAsr] || "Xenova/whisper-base.en";
         const presetName = presetSelect.value;
-        const presetCfg = PRESET_CONFIGS[presetName] || PRESET_CONFIGS["Fisher Telephony (2 speakers)"];
+        const presetCfg = PRESET_CONFIGS[presetName] || PRESET_CONFIGS["Universal Auto (ECAPA powerset_ward)"];
         const reqNumSpk = parseInt(numSpkRange.value, 10);
-        const useLlm = useLlmCheck.checked;
+        const useLlm = (profKey !== "acoustic-only") && useLlmCheck.checked;
         const useLg = useLgCheck.checked;
 
         const wav16k = await decodeAudio16k(fileOrUrl);
@@ -1307,7 +1344,7 @@
         }
 
         const t1 = performance.now();
-        statusBar.textContent = `[Stage 2/4] Running Symmetric Normalized Laplacian SpectralClusterer (${presetName})...`;
+        statusBar.textContent = `[Stage 2/4] Running Acoustic Speaker Clustering (${presetName})...`;
         const { feats, times } = extractWindowFeatures(wav16k, presetCfg.winSec, presetCfg.stepSec);
         const { turns } = spectralClusterWindows(feats, times, reqNumSpk, presetCfg);
         const acSpks = assignSpeakersJS(wordObjs, turns);
@@ -1317,10 +1354,12 @@
         const t2 = performance.now();
         let rawLlmSpks = null;
         if (useLlm) {
-          statusBar.textContent = `[Stage 4/4] Running DiarizationLM-Gemma-4-E4B-v1 + ${useLg ? "LG-TPST" : "Raw-TPST"}...`;
+          const modelLabel = profKey === "fast" ? "DiarizationLM-Gemma-4-E4B-v2" : "DiarizationLM-Gemma-4-12B-v1";
+          const timeoutMs = profKey === "fast" ? 22000 : 40000;
+          statusBar.textContent = `[Stage 4/4] Running ${modelLabel} (${profKey}) + ${useLg ? "LG-TPST" : "Raw-TPST"}...`;
           try {
             const promptText = words.map((w, i) => (i === 0 || acSpks[i] !== acSpks[i - 1]) ? `<speaker:${acSpks[i]}> ${w}` : w).join(" ");
-            const llmOutStr = await queryRemoteDiarizationLM(promptText, 15000);
+            const llmOutStr = await queryRemoteDiarizationLM(promptText, profKey, timeoutMs);
             if (llmOutStr) {
               const parsed = extractTextAndSpkJS(llmOutStr);
               if (parsed.words.length > 0) {
@@ -1362,12 +1401,30 @@
       lastLiveResult = null;
       audioFileInput.value = "";
       inputAudioPlayer.src = ex.audio_url;
+      profileSelect.value = ex.default_profile || "best-quality";
       asrSelect.value = ex.asr_model || "openai/whisper-base.en";
       presetSelect.value = ex.preset_name;
       numSpkRange.value = String(ex.num_speakers);
       numSpkVal.textContent = String(ex.num_speakers);
       renderBuiltinExample(ex);
     }
+
+    profileSelect.addEventListener("change", () => {
+      if (profileSelect.value === "max") {
+        presetSelect.value = "FlaxSpeaker-XL Auto (powerset_ward)";
+      } else if (currentSource.type === "builtin") {
+        presetSelect.value = "Universal Auto (ECAPA powerset_ward)";
+      }
+      if (lastLiveResult) {
+        if (currentSource.file) {
+          runLiveBrowserPipeline(currentSource.file, null);
+        } else {
+          renderLiveResult(lastLiveResult);
+        }
+      } else if (currentSource.type === "builtin") {
+        renderBuiltinExample(BUILTIN_EXAMPLES[currentSource.index]);
+      }
+    });
 
     audioFileInput.addEventListener("change", (e) => {
       const file = e.target.files && e.target.files[0];
@@ -1380,8 +1437,11 @@
     runBtn.addEventListener("click", () => {
       if (currentSource.type === "builtin") {
         const ex = BUILTIN_EXAMPLES[currentSource.index];
+        const expectedPreset = profileSelect.value === "max"
+          ? "FlaxSpeaker-XL Auto (powerset_ward)"
+          : "Universal Auto (ECAPA powerset_ward)";
         const paramsUnchanged = (
-          presetSelect.value === ex.preset_name &&
+          presetSelect.value === expectedPreset &&
           parseInt(numSpkRange.value, 10) === ex.num_speakers &&
           asrSelect.value === (ex.asr_model || "openai/whisper-base.en")
         );

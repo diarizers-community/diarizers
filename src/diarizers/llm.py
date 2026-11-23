@@ -9,6 +9,51 @@ from diarizers import alignment
 from diarizers import configs
 
 
+def resolve_default_gguf_filename(model_path_or_repo: str) -> str:
+  """Resolves the conventional Q4_K_M GGUF filename for a repo ID or path."""
+  clean = str(model_path_or_repo).rstrip("/")
+  base = os.path.basename(clean)
+  if base.endswith(".gguf"):
+    return base
+  if base:
+    return f"{base}-q4_k_m.gguf"
+  return "DiarizationLM-Gemma-4-E4B-v2-q4_k_m.gguf"
+
+
+def load_hf_diarizationlm_model(
+    transformers_mod: Any,
+    model_path_or_repo: str,
+    dtype: Any,
+) -> Any:
+  """Loads Gemma 4 / Gemma 4 Unified (`12B-v1`) / CausalLM models safely."""
+  try:
+    return transformers_mod.AutoModelForCausalLM.from_pretrained(
+        model_path_or_repo,
+        torch_dtype=dtype,
+    )
+  except ValueError:
+    last_exc: Optional[Exception] = None
+    for cls_name in (
+        "Gemma4ForConditionalGeneration",
+        "Gemma4UnifiedForConditionalGeneration",
+        "AutoModelForImageTextToText",
+    ):
+      cls_cand = getattr(transformers_mod, cls_name, None)
+      if cls_cand is None:
+        continue
+      try:
+        return cls_cand.from_pretrained(
+            model_path_or_repo,
+            torch_dtype=dtype,
+        )
+      except (ValueError, KeyError, TypeError) as exc:
+        last_exc = exc
+        continue
+    if last_exc is not None:
+      raise last_exc
+    raise
+
+
 class DiarizationLMRefiner:
   """Post-processes diarized transcripts with DiarizationLM + LG-TPST."""
 
@@ -21,6 +66,7 @@ class DiarizationLMRefiner:
       device: str = "cpu",
       n_ctx: int = 8192,
       n_threads: int = 8,
+      flash_attn: bool = True,
       completion_fn: Optional[Callable[[str], str]] = None,
       model_path: Optional[str] = None,
   ):
@@ -31,6 +77,7 @@ class DiarizationLMRefiner:
     self.device = device
     self.n_ctx = n_ctx
     self.n_threads = n_threads
+    self.flash_attn = flash_attn
     self.completion_fn = completion_fn
     self._llm_instance: Any = None
     self._hf_tokenizer: Any = None
@@ -53,8 +100,19 @@ class DiarizationLMRefiner:
     if not self.model_path_or_repo:
       return
 
+    auto_cpu_gguf = False
+    if (
+        self.backend == "auto"
+        and str(self.device).startswith("cpu")
+        and not os.path.isdir(self.model_path_or_repo)
+    ):
+      import importlib.util
+
+      auto_cpu_gguf = importlib.util.find_spec("llama_cpp") is not None
+
     use_gguf = (
         self.backend == "gguf"
+        or auto_cpu_gguf
         or (self.gguf_filename is not None)
         or self.model_path_or_repo.endswith(".gguf")
     )
@@ -66,18 +124,27 @@ class DiarizationLMRefiner:
       else:
         from huggingface_hub import hf_hub_download
 
-        fname = (
-            self.gguf_filename or "DiarizationLM-Gemma-4-E4B-v1-q4_k_m.gguf"
+        fname = self.gguf_filename or resolve_default_gguf_filename(
+            self.model_path_or_repo
         )
         gguf_path = hf_hub_download(
             repo_id=self.model_path_or_repo, filename=fname
         )
-      self._llm_instance = Llama(
-          model_path=gguf_path,
-          n_ctx=self.n_ctx,
-          n_threads=self.n_threads,
-          verbose=False,
-      )
+      try:
+        self._llm_instance = Llama(
+            model_path=gguf_path,
+            n_ctx=self.n_ctx,
+            n_threads=self.n_threads,
+            flash_attn=self.flash_attn,
+            verbose=False,
+        )
+      except TypeError:
+        self._llm_instance = Llama(
+            model_path=gguf_path,
+            n_ctx=self.n_ctx,
+            n_threads=self.n_threads,
+            verbose=False,
+        )
     else:
       import torch
       import transformers
@@ -95,23 +162,9 @@ class DiarizationLMRefiner:
         ) from exc
 
       dtype = torch.bfloat16 if self.device != "cpu" else torch.float32
-      try:
-        self._hf_model = transformers.AutoModelForCausalLM.from_pretrained(
-            self.model_path_or_repo,
-            torch_dtype=dtype,
-        )
-      except ValueError:
-        cls_cand = getattr(
-            transformers,
-            "Gemma4ForConditionalGeneration",
-            getattr(transformers, "AutoModelForImageTextToText", None),
-        )
-        if cls_cand is None:
-          raise
-        self._hf_model = cls_cand.from_pretrained(
-            self.model_path_or_repo,
-            torch_dtype=dtype,
-        )
+      self._hf_model = load_hf_diarizationlm_model(
+          transformers, self.model_path_or_repo, dtype=dtype
+      )
       self._hf_model.to(self.device)
       self._hf_model.eval()
 
@@ -203,15 +256,24 @@ class DiarizationLMRefiner:
     if not words or len(words) != len(spks):
       return hyp_spk, hyp_spk, []
 
+    use_bytes = bool(getattr(self.prompt_config, "use_byte_budget", False))
+    max_len = (
+        int(getattr(self.prompt_config, "max_chunk_bytes", 5400))
+        if use_bytes
+        else self.prompt_config.emit_input_length
+    )
     chunker = alignment.UtteranceChunker(
-        max_input_length=self.prompt_config.emit_input_length,
-        max_target_length=self.prompt_config.emit_target_length,
+        max_input_length=max_len,
+        max_target_length=(
+            max_len if use_bytes else self.prompt_config.emit_target_length
+        ),
         prompt_prefix=self.prompt_config.prompt_prefix,
         prompt_suffix=self.prompt_config.prompt_suffix,
         completion_suffix=self.prompt_config.completion_suffix,
         speaker_prefix=self.prompt_config.speaker_prefix,
         speaker_suffix=self.prompt_config.speaker_suffix,
         overlap_words=self.prompt_config.overlap_words,
+        use_byte_budget=use_bytes,
     )
 
     chunks = list(chunker.chunk_utterance_fields(words, spks, utt_id=utt_id))
@@ -231,6 +293,9 @@ class DiarizationLMRefiner:
         max_local_span_words=self.prompt_config.max_local_span_words,
         max_ghost_cluster_words=self.prompt_config.max_ghost_cluster_words,
         max_two_spk_span_words=self.prompt_config.max_two_spk_span_words,
+        max_chunk_word_edit_rate=float(
+            getattr(self.prompt_config, "max_chunk_word_edit_rate", 0.0)
+        ),
     )
     return raw_tpst, lg_tpst, completions
 

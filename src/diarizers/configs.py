@@ -32,11 +32,20 @@ class PromptConfig:
   max_two_spk_span_words: int = 15
   max_ghost_cluster_words: int = 15
   overlap_words: int = 0
+  max_chunk_bytes: int = 5400
+  use_byte_budget: bool = False
+  max_chunk_word_edit_rate: float = 0.0
 
 
 DEFAULT_ASR_MODEL = "openai/whisper-large-v3-turbo"
 DEFAULT_SEGMENTATION_MODEL = "pyannote/segmentation-3.0"
 DEFAULT_ECAPA_MODEL = "speechbrain/spkrec-ecapa-voxceleb"
+DEFAULT_FLAXSPEAKER_LARGE_MODEL = "wq2012/univ_full_eres2conformer_large"
+DEFAULT_FLAXSPEAKER_V2_MODEL = "wq2012/univ_full_eres2conformer_v2_large"
+DEFAULT_FLAXSPEAKER_XL_MODEL = "wq2012/univ_full_eres2conformer_xl"
+DEFAULT_LLM_MODEL_V1 = "diarizers-community/DiarizationLM-Gemma-4-E4B-v1"
+DEFAULT_LLM_MODEL_V2 = "diarizers-community/DiarizationLM-Gemma-4-E4B-v2"
+DEFAULT_LLM_MODEL_12B = "diarizers-community/DiarizationLM-Gemma-4-12B-v1"
 
 
 @dataclasses.dataclass
@@ -69,6 +78,17 @@ class DiarizationPreset:
   gaussian_blur_sigma: float = 1.5
   eigen_threshold: float = 0.45
   boundary_snap_tolerance_sec: float = 0.35
+  diarization_mode: str = "powerset_ward"
+  seg_step_sec: float = 2.5
+  min_clean_sec: float = 1.0
+  min_extract_sec: float = 0.4
+  ward_merge_threshold: float = 0.60
+  min_cluster_sec: float = 8.0
+  balanced_centering_beta: float = 1.0
+  stitch_weight: float = 0.50
+  chunk_window_weight: str = "uniform"
+  prob_smooth_sec: float = 0.25
+  em_iters: int = 5
 
 
 @dataclasses.dataclass
@@ -77,12 +97,22 @@ class DiarizersConfig:
 
   asr: ASRConfig = dataclasses.field(default_factory=ASRConfig)
   diarization: DiarizationPreset = dataclasses.field(
-      default_factory=lambda: FISHER_TELEPHONY_PRESET
+      default_factory=lambda: UNIVERSAL_AUTO_PRESET
   )
   prompt: PromptConfig = dataclasses.field(default_factory=PromptConfig)
-  llm_model_or_path: str = (
-      "diarizers-community/DiarizationLM-Gemma-4-E4B-v1"
-  )
+  llm_model_or_path: Optional[str] = DEFAULT_LLM_MODEL_12B
+
+
+@dataclasses.dataclass(frozen=True)
+class PipelineProfile:
+  """Named high-level quality/cost profile for DiarizersPipeline."""
+
+  name: str
+  asr_model: str
+  diarization: DiarizationPreset
+  llm_model_or_path: Optional[str]
+  use_locality_gate: bool = True
+  description: str = ""
 
 
 DEFAULT_ASR_CONFIG = ASRConfig()
@@ -138,6 +168,167 @@ MEETING_MULTISPK_PRESET = DiarizationPreset(
     p_percentile=0.70,
     gaussian_blur_sigma=1.5,
     eigen_threshold=0.45,
+    ward_merge_threshold=0.60,
 )
+
+FLAXSPEAKER_LARGE_PRESET = DiarizationPreset(
+    name="flaxspeaker_large_auto",
+    segmentation_model="pyannote/segmentation-3.0",
+    encoder_name=DEFAULT_FLAXSPEAKER_LARGE_MODEL,
+    window_frames=200,
+    step_frames=100,
+    min_clusters=1,
+    max_clusters=10,
+    diarization_mode="powerset_ward",
+    ward_merge_threshold=0.70,
+    min_clean_sec=1.0,
+    min_cluster_sec=8.0,
+    balanced_centering_beta=1.0,
+    chunk_window_weight="uniform",
+    prob_smooth_sec=0.25,
+)
+
+FLAXSPEAKER_V2_PRESET = DiarizationPreset(
+    name="flaxspeaker_v2_large_auto",
+    segmentation_model="pyannote/segmentation-3.0",
+    encoder_name=DEFAULT_FLAXSPEAKER_V2_MODEL,
+    window_frames=200,
+    step_frames=100,
+    min_clusters=1,
+    max_clusters=10,
+    diarization_mode="powerset_ward",
+    ward_merge_threshold=0.70,
+    min_clean_sec=1.0,
+    min_cluster_sec=8.0,
+    balanced_centering_beta=1.0,
+    chunk_window_weight="uniform",
+    prob_smooth_sec=0.25,
+)
+
+FLAXSPEAKER_XL_PRESET = DiarizationPreset(
+    name="flaxspeaker_xl_auto",
+    segmentation_model="pyannote/segmentation-3.0",
+    encoder_name=DEFAULT_FLAXSPEAKER_XL_MODEL,
+    window_frames=200,
+    step_frames=100,
+    min_clusters=1,
+    max_clusters=10,
+    diarization_mode="powerset_ward",
+    ward_merge_threshold=0.70,
+    min_clean_sec=1.0,
+    min_cluster_sec=8.0,
+    balanced_centering_beta=1.0,
+    chunk_window_weight="uniform",
+    prob_smooth_sec=0.25,
+)
+
+UNIVERSAL_AUTO_PRESET = DiarizationPreset(
+    name="universal_auto",
+    segmentation_model="pyannote/segmentation-3.0",
+    encoder_name=DEFAULT_ECAPA_MODEL,
+    window_frames=200,
+    step_frames=100,
+    min_clusters=1,
+    max_clusters=10,
+    diarization_mode="powerset_ward",
+    ward_merge_threshold=0.60,
+    min_clean_sec=1.0,
+    min_cluster_sec=8.0,
+    balanced_centering_beta=1.0,
+    chunk_window_weight="uniform",
+    prob_smooth_sec=0.25,
+)
+
+BEST_QUALITY_PROFILE = PipelineProfile(
+    name="best-quality",
+    asr_model=DEFAULT_ASR_MODEL,
+    diarization=UNIVERSAL_AUTO_PRESET,
+    llm_model_or_path=DEFAULT_LLM_MODEL_12B,
+    use_locality_gate=True,
+    description=(
+        "Best overall accuracy (3.88% micro / 5.25% macro WDER): "
+        "fast ECAPA powerset_ward + DiarizationLM-Gemma-4-12B-v1."
+    ),
+)
+
+MAX_PROFILE = PipelineProfile(
+    name="max",
+    asr_model=DEFAULT_ASR_MODEL,
+    diarization=FLAXSPEAKER_XL_PRESET,
+    llm_model_or_path=DEFAULT_LLM_MODEL_12B,
+    use_locality_gate=True,
+    description=(
+        "Maximum multi-speaker accuracy (3.49% CALLHOME / 6.33% ICSI WDER): "
+        "FlaxSpeaker SimAM-ERes2Conformer-XL + DiarizationLM-Gemma-4-12B-v1."
+    ),
+)
+
+FAST_PROFILE = PipelineProfile(
+    name="fast",
+    asr_model=DEFAULT_ASR_MODEL,
+    diarization=UNIVERSAL_AUTO_PRESET,
+    llm_model_or_path=DEFAULT_LLM_MODEL_V2,
+    use_locality_gate=True,
+    description=(
+        "2x faster LLM & ~50% lower RAM (~7.6 GiB GGUF, 4.13% micro WDER): "
+        "ECAPA powerset_ward + DiarizationLM-Gemma-4-E4B-v2."
+    ),
+)
+
+ACOUSTIC_ONLY_PROFILE = PipelineProfile(
+    name="acoustic-only",
+    asr_model=DEFAULT_ASR_MODEL,
+    diarization=UNIVERSAL_AUTO_PRESET,
+    llm_model_or_path=None,
+    use_locality_gate=True,
+    description=(
+        "Lightweight acoustic powerset_ward diarization without LLM "
+        "(5.65% micro / 6.96% macro WDER, <2 GiB RAM)."
+    ),
+)
+
+PIPELINE_PROFILES = {
+    "best-quality": BEST_QUALITY_PROFILE,
+    "max": MAX_PROFILE,
+    "fast": FAST_PROFILE,
+    "acoustic-only": ACOUSTIC_ONLY_PROFILE,
+}
+
+PIPELINE_PROFILE_ALIASES = {
+    "best-quality": "best-quality",
+    "best": "best-quality",
+    "quality": "best-quality",
+    "default": "best-quality",
+    "max": "max",
+    "flaxspeaker": "max",
+    "best-flaxspeaker": "max",
+    "max-multispk": "max",
+    "gpu": "max",
+    "fast": "fast",
+    "balanced": "fast",
+    "lite": "fast",
+    "cpu": "fast",
+    "acoustic-only": "acoustic-only",
+    "no-llm": "acoustic-only",
+    "realtime": "acoustic-only",
+    "acoustic": "acoustic-only",
+}
+
+
+def resolve_pipeline_profile(
+    profile: Optional[str] = "best-quality",
+) -> PipelineProfile:
+  """Resolves a profile name or alias into its canonical PipelineProfile."""
+  key = (profile or "best-quality").strip().lower().replace("_", "-")
+  canonical = PIPELINE_PROFILE_ALIASES.get(key)
+  if canonical is None:
+    valid = ", ".join(sorted(PIPELINE_PROFILES.keys()))
+    raise ValueError(
+        f"Unknown pipeline profile '{profile}'. "
+        f"Choose one of: {valid} (or aliases: best, flaxspeaker, balanced, "
+        "no-llm)."
+    )
+  return PIPELINE_PROFILES[canonical]
+
 
 DEFAULT_DIARIZERS_CONFIG = DiarizersConfig()

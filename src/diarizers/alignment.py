@@ -1,7 +1,10 @@
 """Word-speaker alignment, TPST, LG-TPST, and chunk reconciliation."""
 
 from collections.abc import Generator, Sequence
+import math
+import re
 from typing import Any, Dict, List, Optional, Tuple, Union
+import unicodedata
 
 import numpy as np
 from scipy import optimize
@@ -10,6 +13,80 @@ from diarizers import configs
 from diarizers import types
 
 PUNCTUATIONS = [",", ".", "_", "?", "!", "-", '"', "'"]
+
+_THOUGHT_BLOCK_RE = re.compile(r"(?s)<\|channel>thought.*?<channel\|>\s*")
+_XML_THOUGHT_RE = re.compile(r"(?s)<thought>.*?</thought>\s*")
+_CTRL_TOKEN_RE = re.compile(
+    r"<(?:ctrl\d+|eos@[^>]+|sos@[^>]+|pf@[^>]+|\|turn|turn\||"
+    r"start_of_turn|end_of_turn)>"
+)
+
+
+def is_non_space_script_char(ch: str) -> bool:
+  """Returns whether a character belongs to a CJK or SEA non-space script."""
+  if not ch:
+    return False
+  cp = ord(ch)
+  return (
+      0x4E00 <= cp <= 0x9FFF
+      or 0x3400 <= cp <= 0x4DBF
+      or 0x3040 <= cp <= 0x30FF
+      or 0x31F0 <= cp <= 0x31FF
+      or 0x0E00 <= cp <= 0x0E7F
+      or 0x0E80 <= cp <= 0x0EFF
+      or 0x1780 <= cp <= 0x17FF
+      or 0x1000 <= cp <= 0x109F
+      or cp == 0x30FC
+  )
+
+
+def strip_control_tokens(text: str) -> str:
+  """Removes model thought blocks and control artifacts from LLM output."""
+  if not text:
+    return ""
+  cleaned = _THOUGHT_BLOCK_RE.sub("", text)
+  cleaned = _XML_THOUGHT_RE.sub("", cleaned)
+  cleaned = _CTRL_TOKEN_RE.sub("", cleaned)
+  for marker in ("<turn|>", "<end_of_turn>", "<eos>"):
+    cleaned = cleaned.replace(marker, "")
+  return cleaned
+
+
+def tokenize_multilingual_text(text: str) -> List[str]:
+  """Splits space-delimited words and individual CJK/SEA character units."""
+  tokens: List[str] = []
+  buf: List[str] = []
+  for ch in text:
+    if ch.isspace():
+      if buf:
+        tokens.append("".join(buf))
+        buf.clear()
+      continue
+    cat = unicodedata.category(ch)
+    if is_non_space_script_char(ch):
+      if buf:
+        tokens.append("".join(buf))
+        buf.clear()
+      tokens.append(ch)
+    elif cat.startswith("M") and tokens and not buf:
+      tokens[-1] += ch
+    else:
+      buf.append(ch)
+  if buf:
+    tokens.append("".join(buf))
+  return tokens
+
+
+def _count_speaker_runs(spks: Sequence[Union[str, int]]) -> int:
+  """Counts contiguous speaker turns (runs) inside a sequence."""
+  runs = 0
+  prev: Optional[str] = None
+  for s in spks:
+    cur = str(s)
+    if cur != prev:
+      runs += 1
+      prev = cur
+  return runs
 
 
 def normalize_text(text: str) -> str:
@@ -119,6 +196,55 @@ def assign_speakers(
   return assigned_speakers
 
 
+def assign_speakers_from_probs(
+    asr_words: Sequence[Union[types.WordSegment, Dict[str, Any]]],
+    frame_probs: np.ndarray,
+    frame_dt: float,
+    normalize_speaker_ids: bool = True,
+    min_active_prob: float = 0.05,
+) -> List[str]:
+  """Assigns each ASR word by integrating continuous soft frame probs."""
+  if not asr_words:
+    return []
+  probs = np.asarray(frame_probs, dtype=np.float32)
+  if probs.ndim != 2 or probs.shape[0] == 0 or probs.shape[1] == 0:
+    return ["1"] * len(asr_words)
+  if probs.shape[1] == 1:
+    return ["1"] * len(asr_words)
+
+  total_frames = probs.shape[0]
+  active_idx = np.where(probs.max(axis=1) > min_active_prob)[0]
+  assigned: List[str] = []
+  last_spk = "1"
+  for w in asr_words:
+    ws, we = _extract_word_bounds(w)
+    if we < ws:
+      we = ws
+    f0 = max(0, min(total_frames - 1, int(math.floor(ws / frame_dt))))
+    f1 = max(f0 + 1, min(total_frames, int(math.ceil(we / frame_dt))))
+    mass = probs[f0:f1].sum(axis=0)
+    if float(mass.max()) > min_active_prob:
+      last_spk = str(int(np.argmax(mass)) + 1)
+      assigned.append(last_spk)
+    elif active_idx.size > 0:
+      mid_f = 0.5 * (ws + we) / frame_dt
+      pos = int(np.searchsorted(active_idx, mid_f))
+      cands: List[int] = []
+      if pos > 0:
+        cands.append(int(active_idx[pos - 1]))
+      if pos < len(active_idx):
+        cands.append(int(active_idx[pos]))
+      best_f = min(cands, key=lambda ff: abs(ff - mid_f))
+      last_spk = str(int(np.argmax(probs[best_f])) + 1)
+      assigned.append(last_spk)
+    else:
+      assigned.append(last_spk)
+
+  if normalize_speaker_ids:
+    return speakers_transform(assigned)
+  return assigned
+
+
 def create_diarized_text(
     word_labels: Sequence[str],
     speaker_labels: Sequence[Union[str, int]],
@@ -144,7 +270,7 @@ def extract_text_and_spk(
     diarized_text: str,
     speaker_prefix: str = configs.SPEAKER_PREFIX,
     speaker_suffix: str = configs.SPEAKER_SUFFIX,
-    max_speaker_id: int = 20,
+    max_speaker_id: int = 50,
 ) -> Tuple[str, str]:
   """Extracts plain word sequence and speaker sequence from diarized text."""
   spk = "1"
@@ -573,6 +699,7 @@ class UtteranceChunker:
       speaker_prefix: str = configs.SPEAKER_PREFIX,
       speaker_suffix: str = configs.SPEAKER_SUFFIX,
       overlap_words: int = 0,
+      use_byte_budget: bool = False,
   ):
     self.max_input_length = max_input_length
     self.max_target_length = max_target_length
@@ -582,6 +709,12 @@ class UtteranceChunker:
     self.speaker_prefix = speaker_prefix
     self.speaker_suffix = speaker_suffix
     self.overlap_words = max(0, int(overlap_words))
+    self.use_byte_budget = bool(use_byte_budget)
+
+  def _unit_len(self, text: str) -> int:
+    if self.use_byte_budget:
+      return len(text.encode("utf-8"))
+    return len(text)
 
   def chunk_utterance_fields(
       self,
@@ -596,8 +729,10 @@ class UtteranceChunker:
       return
 
     has_target = target_spks is not None and len(target_spks) == total_words
-    prompt_overhead = len(self.prompt_prefix) + len(self.prompt_suffix)
-    completion_overhead = len(self.completion_suffix)
+    prompt_overhead = (
+        self._unit_len(self.prompt_prefix) + self._unit_len(self.prompt_suffix)
+    )
+    completion_overhead = self._unit_len(self.completion_suffix)
 
     start_idx = 0
     seg_idx = 0
@@ -609,12 +744,14 @@ class UtteranceChunker:
       prev_tgt_spk: Optional[str] = None
 
       while end_idx < total_words:
-        w_len = len(words[end_idx]) + (1 if end_idx > start_idx else 0)
+        w_len = (
+            self._unit_len(words[end_idx]) + (1 if end_idx > start_idx else 0)
+        )
         curr_in_spk = str(input_spks[end_idx])
         in_spk_cost = (
-            len(self.speaker_prefix)
-            + len(curr_in_spk)
-            + len(self.speaker_suffix)
+            self._unit_len(self.speaker_prefix)
+            + self._unit_len(curr_in_spk)
+            + self._unit_len(self.speaker_suffix)
             + (1 if end_idx > start_idx else 0)
             if curr_in_spk != prev_in_spk
             else 0
@@ -624,9 +761,9 @@ class UtteranceChunker:
         if has_target and target_spks is not None:
           curr_tgt_spk = str(target_spks[end_idx])
           tgt_spk_cost = (
-              len(self.speaker_prefix)
-              + len(curr_tgt_spk)
-              + len(self.speaker_suffix)
+              self._unit_len(self.speaker_prefix)
+              + self._unit_len(curr_tgt_spk)
+              + self._unit_len(self.speaker_suffix)
               + (1 if end_idx > start_idx else 0)
               if curr_tgt_spk != prev_tgt_spk
               else 0
@@ -699,13 +836,14 @@ def truncate_completion_suffix(
     completion: str,
     completion_suffix: str = configs.COMPLETION_SUFFIX,
 ) -> str:
-  """Truncates completion at the first occurrence of suffix or turn tag."""
-  text = completion.strip()
+  """Truncates completion at the first suffix/turn tag and strips ctrl tags."""
+  text = _THOUGHT_BLOCK_RE.sub("", completion)
+  text = _XML_THOUGHT_RE.sub("", text).strip()
   markers: List[str] = []
   suf = completion_suffix.strip()
   if suf:
     markers.append(suf)
-  for m in ("<turn|>", "<|endoftext|>", "<eos>"):
+  for m in ("<turn|>", "<|endoftext|>", "<eos>", "<end_of_turn>"):
     if m not in markers:
       markers.append(m)
   cut_idx = len(text)
@@ -713,7 +851,7 @@ def truncate_completion_suffix(
     pos = text.find(marker)
     if pos != -1 and pos < cut_idx:
       cut_idx = pos
-  return text[:cut_idx].strip()
+  return strip_control_tokens(text[:cut_idx]).strip()
 
 
 def reconcile_chunk_speakers_hungarian(
@@ -725,6 +863,7 @@ def reconcile_chunk_speakers_hungarian(
     max_local_span_words: int = 5,
     max_ghost_cluster_words: int = 15,
     max_two_spk_span_words: int = 15,
+    max_chunk_word_edit_rate: float = 0.0,
 ) -> Tuple[str, str]:
   """Reconciles chunk-level LLM completions via TPST and Hungarian matching."""
   if not utt_words or not utt_hyp_spks:
@@ -757,6 +896,19 @@ def reconcile_chunk_speakers_hungarian(
           speaker_prefix=chunker.speaker_prefix,
           speaker_suffix=chunker.speaker_suffix,
       )
+      llm_norm_words = normalize_text(llm_text).split()
+      hyp_norm_words = normalize_text(" ".join(c_words)).split()
+      reject_chunk = False
+      if max_chunk_word_edit_rate > 0.0 and hyp_norm_words:
+        if not llm_norm_words:
+          reject_chunk = True
+        else:
+          edit_d = levenshtein_distance(hyp_norm_words, llm_norm_words)
+          if edit_d / float(len(hyp_norm_words)) > max_chunk_word_edit_rate:
+            reject_chunk = True
+      if reject_chunk:
+        reconciled_raw.extend(str(x) for x in c_hyp_spks[already:])
+        continue
       transferred_str = transcript_preserving_speaker_transfer(
           src_text=llm_text,
           src_spk=llm_spk,
@@ -765,6 +917,12 @@ def reconcile_chunk_speakers_hungarian(
       )
       c_llm_spks = [int(x) for x in transferred_str.split()]
       if len(c_llm_spks) == len(c_hyp_spks):
+        if max_chunk_word_edit_rate > 0.0 and len(c_hyp_spks) >= 40:
+          orig_runs = _count_speaker_runs(c_hyp_spks)
+          new_runs = _count_speaker_runs(c_llm_spks)
+          if new_runs > max(40, 3 * orig_runs + 12):
+            reconciled_raw.extend(str(x) for x in c_hyp_spks[already:])
+            continue
         aligned_c = get_oracle_speakers(c_llm_spks, c_llm_spks, c_ref_spks)
         reconciled_raw.extend(str(x) for x in aligned_c[already:])
       else:

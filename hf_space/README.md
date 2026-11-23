@@ -1,36 +1,38 @@
 ---
-title: Diarizers v1.0.1 — Open-Source ASR, Diarization & DiarizationLM
+title: Diarizers v1.1.0 — Open-Source ASR, Diarization & DiarizationLM
 emoji: 🎙️
-colorFrom: blue
-colorTo: indigo
-sdk: gradio
-sdk_version: 5.50.0
-app_file: app.py
-pinned: false
+colorFrom: indigo
+colorTo: blue
+sdk: static
+app_file: index.html
+pinned: true
 license: apache-2.0
-short_description: End-to-End Apache-2.0 ASR + Speaker Diarization + DiarizationLM on CPU
+models:
+  - diarizers-community/DiarizationLM-Gemma-4-12B-v1
+  - diarizers-community/DiarizationLM-Gemma-4-E4B-v2
+  - wq2012/univ_full_eres2conformer_xl
+  - openai/whisper-large-v3-turbo
+  - pyannote/segmentation-3.0
+  - speechbrain/spkrec-ecapa-voxceleb
+short_description: End-to-End Open-Source ASR, Diarization & DiarizationLM Demo
 ---
 
-# Diarizers v1.0.1 — Interactive ASR, Speaker Diarization & DiarizationLM Demo
+# 🎙️ Diarizers (`v1.1.0`) — End-to-End Open-Source ASR, Speaker Diarization & DiarizationLM Demo
 
-## Overview
+Interactive audio demo for the [`diarizers`](https://github.com/diarizers-community/diarizers) (`pip install -U diarizers`) `v1.1.0` end-to-end audio pipeline, featuring configurable **Quality vs. Speed Profiles**:
 
-> This interactive demo and the `diarizers` (`v1.0.1`) library provide an Apache-2.0 open-source unified inference pipeline for:
-> - **DiarizationLM**: *DiarizationLM: Speaker Diarization Post-Processing with Large Language Models* ([arXiv:2401.03506](https://arxiv.org/abs/2401.03506))
-> - **SpectralCluster**: *Speaker Diarization with LSTM* ([arXiv:1710.10468](https://arxiv.org/abs/1710.10468))
-> - **Turn-to-Diarize**: *Turn-to-Diarize: Online Speaker Diarization Constrained by Transformer Transducer Speaker Turn Detection* ([arXiv:2109.11641](https://arxiv.org/abs/2109.11641))
->
-> This open-source package pairs MIT/Apache-2.0 acoustic frontends (`openai/whisper-large-v3-turbo` + `pyannote/segmentation-3.0` + `speechbrain/spkrec-ecapa-voxceleb` + `SpectralClusterer`) with [`diarizers-community/DiarizationLM-Gemma-4-E4B-v1`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v1) and **Locality-Gated Transcript-Preserving Speaker Transfer (LG-TPST)** entirely on CPU or GPU.
+- **`best-quality`** *(Default)*: `openai/whisper-large-v3-turbo` + `ECAPA-TDNN` (`powerset_ward`) + [`DiarizationLM-Gemma-4-12B-v1`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-12B-v1) (`3.88%` micro / `5.25%` macro WDER across 211 held-out benchmark recordings)
+- **`max`**: `openai/whisper-large-v3-turbo` + [`FlaxSpeaker`](https://github.com/wq2012/FlaxSpeaker) `SimAM-ERes2Conformer-XL` (`powerset_ward`) + [`DiarizationLM-Gemma-4-12B-v1`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-12B-v1) (`3.49%` CALLHOME / `6.33%` ICSI WDER)
+- **`fast`**: `openai/whisper-large-v3-turbo` + `ECAPA-TDNN` (`powerset_ward`) + [`DiarizationLM-Gemma-4-E4B-v2`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v2) (`4.13%` micro WDER, `2×` faster CPU generation, `~7.6 GiB` RAM)
+- **`acoustic-only`**: `openai/whisper-large-v3-turbo` + `ECAPA-TDNN` (`powerset_ward`, `5.65%` micro WDER, `<2 GiB` RAM, no LLM)
 
-## Links & Resources
+For the companion text-only multilingual `DiarizationLM` GGUF demo (`E4B-v2` & `12B-v1`), visit [`spaces/diarizers-community/DiarizationLM-GGUF`](https://huggingface.co/spaces/diarizers-community/DiarizationLM-GGUF).
 
-- **GitHub Repository**: [`diarizers-community/diarizers`](https://github.com/diarizers-community/diarizers)
-- **End-to-End Audio Pipeline Space**: [`spaces/diarizers-community/diarizers`](https://huggingface.co/spaces/diarizers-community/diarizers)
-- **Text-Only DiarizationLM GGUF Space**: [`spaces/diarizers-community/DiarizationLM-GGUF`](https://huggingface.co/spaces/diarizers-community/DiarizationLM-GGUF)
-- **Pretrained DiarizationLM Model**: [`diarizers-community/DiarizationLM-Gemma-4-E4B-v1`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v1)
-- **Legacy Repository (Archived)**: [`diarizers-community/DiarizersLM`](https://github.com/diarizers-community/DiarizersLM)
+## Running the Full Python Gradio App Locally
 
-## Key Capabilities
+This directory includes both a zero-install browser-native static application (`index.html`) and a full Python Gradio application (`app.py`):
 
-1. **End-to-End Audio Pipeline (`spaces/diarizers-community/diarizers`, `app.py` & `index.html`)**: Includes both the Python Gradio application (`app.py`, running `WhisperWordASR` + `ECAPASpectralDiarizer` + `DiarizationLM-Gemma-4-E4B-v1` `Q4_K_M` GGUF + `LG-TPST`/`Raw-TPST`) and the zero-install browser-native static application (`index.html`, running Transformers.js Whisper ASR + Symmetric Normalized Laplacian `SpectralClusterer` + `DiarizationLM` / `TPST` / `LG-TPST`), exporting formatted text, NIST RTTM, and WebVTT/SRT subtitles.
-2. **Companion Text-Only DiarizationLM GGUF Demo (`spaces/diarizers-community/DiarizationLM-GGUF`)**: Refine any diarized transcript (`<speaker:1> ... <speaker:2> ...`) directly with `DiarizationLM-Gemma-4-E4B-v1` (`Q4_K_M` GGUF) and inspect word-by-word speaker boundary corrections guaranteed to preserve the exact input words via `TPST`.
+```bash
+pip install -r requirements.txt
+python app.py
+```

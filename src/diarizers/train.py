@@ -118,24 +118,12 @@ def run_lora_sft_training(
     if tokenizer.pad_token is None:
       tokenizer.pad_token = tokenizer.eos_token
 
+    from diarizers import llm as llm_lib
+
     dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
-    try:
-      model = transformers.AutoModelForCausalLM.from_pretrained(
-          cfg.model_name_or_path,
-          torch_dtype=dtype,
-      )
-    except ValueError:
-      cls_cand = getattr(
-          transformers,
-          "Gemma4ForConditionalGeneration",
-          getattr(transformers, "AutoModelForImageTextToText", None),
-      )
-      if cls_cand is None:
-        raise
-      model = cls_cand.from_pretrained(
-          cfg.model_name_or_path,
-          torch_dtype=dtype,
-      )
+    model = llm_lib.load_hf_diarizationlm_model(
+        transformers, cfg.model_name_or_path, dtype=dtype
+    )
     lora_cfg = peft.LoraConfig(
         r=cfg.lora_rank,
         lora_alpha=cfg.lora_alpha,

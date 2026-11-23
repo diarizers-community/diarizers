@@ -1,7 +1,7 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
 audioop-lts; python_version >= "3.13"
-diarizers>=1.0.1
+diarizers>=1.1.0
 gradio==5.50.0
 huggingface-hub>=0.22.0
 llama-cpp-python>=0.2.80

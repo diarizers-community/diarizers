@@ -1,4 +1,4 @@
-# 🤗 Diarizers (`v1.0.1`) — Unified Open-Source ASR, Speaker Diarization, and DiarizationLM Post-Processing
+# 🤗 Diarizers (`v1.1.0`) — Unified Open-Source ASR, Speaker Diarization, and DiarizationLM Post-Processing
 
 [![Python package](https://github.com/diarizers-community/diarizers/actions/workflows/pythonapp.yml/badge.svg)](https://github.com/diarizers-community/diarizers/actions/workflows/pythonapp.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -6,28 +6,31 @@
 [![Python Versions](https://img.shields.io/pypi/pyversions/diarizers.svg)](https://pypi.org/project/diarizers/)
 [![Downloads](https://static.pepy.tech/badge/diarizers)](https://www.pepy.tech/projects/diarizers)
 [![arxiv](https://img.shields.io/badge/arXiv-2401.03506-blue.svg)](https://arxiv.org/abs/2401.03506)
-[![HuggingFace](https://img.shields.io/badge/Hugging_Face-DiarizationLM--Gemma--4--E4B--v1-blue.svg)](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v1)
+[![E4B-v2](https://img.shields.io/badge/Hugging_Face-DiarizationLM--Gemma--4--E4B--v2-blue.svg)](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v2)
+[![12B-v1](https://img.shields.io/badge/Hugging_Face-DiarizationLM--Gemma--4--12B--v1-green.svg)](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-12B-v1)
 [![Audio Demo Space](https://img.shields.io/badge/Audio_Demo-spaces%2Fdiarizers-blue.svg)](https://huggingface.co/spaces/diarizers-community/diarizers)
 [![Text Demo Space](https://img.shields.io/badge/Text_Demo-DiarizationLM--GGUF-blue.svg)](https://huggingface.co/spaces/diarizers-community/DiarizationLM-GGUF)
 
 ## Table of Contents
 
 * [Overview](#overview)
+* [Configurable Pipeline Profiles (`best-quality`, `max`, `fast`, `acoustic-only`)](#configurable-pipeline-profiles-best-quality-max-fast-acoustic-only)
 * [Architecture](#architecture)
-* [Why 2024 `DiarizersLM` Had 43.99%–56.79% WDER & How `diarizers` (`v1.0.1`) Solves It](#why-2024-diarizerslm-had-43995679-wder--how-diarizers-v101-solves-it)
+* [Why 2024 `DiarizersLM` Had 43.99%–56.79% WDER & How `diarizers` Solves It](#why-2024-diarizerslm-had-43995679-wder--how-diarizers-solves-it)
 * [Evaluation Results](#evaluation-results)
-  * [Table 1: Open-Source Frontend (`diarizers` v1.0.1) + `DiarizationLM-Gemma-4-E4B-v1`](#table-1-open-source-frontend-diarizers-v101--diarizationlm-gemma-4-e4b-v1)
+  * [Table 0: End-to-End `diarizers` `v1.1.0` (`powerset_ward`) Benchmark (`211` Test Recordings)](#table-0-end-to-end-diarizers-v110-powerset_ward-benchmark-211-held-out-test-recordings-bfloat16)
+  * [Table 1: Open-Source Frontend (`diarizers` v1.0.1 Legacy Baseline) + `DiarizationLM-Gemma-4-E4B-v1`](#table-1-open-source-frontend-diarizers-v101-legacy-baseline--diarizationlm-gemma-4-e4b-v1)
   * [Decomposed Stage-by-Stage Ablation, Model Reuse & Multi-Party Meeting Analysis](#decomposed-stage-by-stage-ablation-model-reuse--multi-party-meeting-analysis)
   * [Table 2: USM + Turn-to-Diarize Frontend + `DiarizationLM-Gemma-4-E4B-v1`](#table-2-usm--turn-to-diarize-frontend--diarizationlm-gemma-4-e4b-v1)
 * [Installation](#installation)
 * [How to Run the Pipeline](#how-to-run-the-pipeline)
   * [1. One-Liner End-to-End Python API (`DiarizersPipeline.from_pretrained`)](#1-one-liner-end-to-end-python-api-diarizerspipelinefrom_pretrained)
   * [2. Modular End-to-End Python API (`DiarizationPipeline`)](#2-modular-end-to-end-python-api-diarizationpipeline)
-  * [3. Post-Processing Any Diarized Transcript with `DiarizationLM-Gemma-4-E4B-v1`](#3-post-processing-any-diarized-transcript-with-diarizationlm-gemma-4-e4b-v1)
+  * [3. Post-Processing Any Diarized Transcript with `DiarizationLM`](#3-post-processing-any-diarized-transcript-with-diarizationlm)
   * [4. Command-Line Interface (`diarizers` CLI & `scripts/`)](#4-command-line-interface-diarizers-cli--scripts)
   * [5. Training & Exporting Custom DiarizationLM Models](#5-training--exporting-custom-diarizationlm-models)
   * [6. Evaluating WER, WDER, cpWER, and SpkCntMAE](#6-evaluating-wer-wder-cpwer-and-spkcntmae)
-  * [7. Interactive CPU Gradio Demo (`hf_space/app.py`)](#7-interactive-cpu-gradio-demo-hf_spaceapppy)
+  * [7. Interactive CPU Demos (`hf_space/app.py` & `hf_space/index.html`)](#7-interactive-cpu-demos-hf_spaceapppy--hf_spaceindexhtml)
 * [Data Format](#data-format)
 * [Repository Structure](#repository-structure)
 * [Pretrained Models on Hugging Face](#pretrained-models-on-hugging-face)
@@ -38,23 +41,36 @@
 
 ## Overview
 
-**`diarizers` (`v1.0.1`)** is a unified, self-contained **Apache-2.0** Python library and CLI for end-to-end **speaker-attributed automatic speech recognition (ASR + Speaker Diarization + DiarizationLM Post-Processing)**, as well as training and evaluating custom DiarizationLM models.
+**`diarizers` (`v1.1.0`)** is a unified, self-contained **Apache-2.0** Python library and CLI for end-to-end **speaker-attributed automatic speech recognition (ASR + Speaker Diarization + DiarizationLM Post-Processing)**, as well as training and evaluating custom DiarizationLM models.
 
 It combines:
 1. **Word-Timestamped Open-Source ASR (`diarizers.asr`)**: Defaulting to [`openai/whisper-large-v3-turbo`](https://huggingface.co/openai/whisper-large-v3-turbo) (MIT License) with segment-level timestamp decoding and character-proportional word timestamp interpolation (and also supporting `Qwen/Qwen3-ASR` GGUF via `audio.cpp`, Apache-2.0 License, or precomputed word segments).
-2. **Neural Speaker Turn Segmentation + Speaker Embeddings + Spectral Clustering (`diarizers.diarization` & `diarizers.spectral`)**:
-   - Standalone pure-PyTorch implementation of [`pyannote/segmentation-3.0`](https://huggingface.co/pyannote/segmentation-3.0) (`PyanNetSegmentation`: SincNet + 4-layer BiLSTM + 7-class powerset classifier, MIT License, with automatic fallback to un-gated MIT mirrors such as [`diarizers-community/speaker-segmentation-fine-tuned-callhome-eng`](https://huggingface.co/diarizers-community/speaker-segmentation-fine-tuned-callhome-eng)) for local speaker-change flux boundary snapping.
-   - Standalone pure-PyTorch implementation of [`speechbrain/spkrec-ecapa-voxceleb`](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb) (`SpeechBrainECAPATDNN`, Apache-2.0 License) with exact HTK decibel-scaled (`10 * log10`) 80-bin log-mel filterbanks, global embedding mean subtraction (`mean_var_norm_emb.ckpt`), and recording-level channel centering.
-   - Clean-room **Symmetric Normalized Laplacian Spectral Clusterer** (`L_sym = I - D^{-1/2} W D^{-1/2}`, Apache-2.0 License) with Gaussian temporal smoothing, percentile thresholding, and calibrated eigengap speaker count estimation (`eigen_threshold=0.45`).
-3. **Sub-Millisecond Word-to-Turn Alignment & Chunked Prompting (`diarizers.alignment`)**: Exact float64 word-to-turn overlap orchestration (`assign_speakers`), nearest-turn midpoint fallback, first-appearance speaker renumbering, and 4,000-character chunked prompt building (`ChunkedPromptBuilder`).
-4. **DiarizationLM Post-Processing & Locality-Gated Transcript-Preserving Speaker Transfer (`diarizers.llm` & `diarizers.alignment`)**: Post-processing via **[`diarizers-community/DiarizationLM-Gemma-4-E4B-v1`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v1)** (Apache-2.0 License, supporting both 4-bit `Q4_K_M` GGUF on CPU via `llama.cpp` and `bfloat16`/`float32` Safetensors on GPU/CPU via Hugging Face `transformers`), paired with **Myers' (1999) bit-parallel exact word-level Levenshtein alignment (`tpst_align`)**, Hungarian inter-chunk permutation reconciliation, and **Locality-Gated Transcript-Preserving Speaker Transfer (`LG-TPST`)**.
+2. **Overlapping Powerset Speaker Segmentation + ECAPA / FlaxSpeaker Embeddings + Auto-`K` Clustering (`diarizers.diarization`, `diarizers.flaxspeaker_encoder` & `diarizers.spectral`)**:
+   - Standalone pure-PyTorch implementation of [`pyannote/segmentation-3.0`](https://huggingface.co/pyannote/segmentation-3.0) (`PyanNetSegmentation`: SincNet + 4-layer BiLSTM + 7-class powerset classifier, MIT License, with automatic fallback to un-gated mirrors) extracting clean overlapping single-speaker tracks (`powerset_ward`).
+   - Standalone pure-PyTorch implementations of both [`speechbrain/spkrec-ecapa-voxceleb`](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb) (`SpeechBrainECAPATDNN`, `20.8M`, Apache-2.0 License, `13×` faster on CPU) and [`wq2012/FlaxSpeaker`](https://github.com/wq2012/FlaxSpeaker) **`SimAM-ERes2Conformer`** (`FlaxSpeakerERes2Conformer`, `31.8M`–`64.4M`, `cos = 1.0000000` float32 parity with native JAX, Apache-2.0 License).
+   - **Ward Auto-`K` + Cannot-Link Cosine EM + Balanced Speaker-Centroid Centering + Soft Powerset Stitching** (`powerset_ward`, cutting multi-speaker meeting WDER on ICSI from `23.48% → 6.33%` and AMI from `20.68% → 8.04%`), alongside the clean-room **Symmetric Normalized Laplacian Spectral Clusterer** (`diarization_mode="sliding_spectral"`).
+3. **Sub-Millisecond Frame-Posterior & Turn Alignment + Chunked Prompting (`diarizers.alignment`)**: Soft frame-probability word assignment (`assign_speakers_from_probs`) and float64 turn-overlap fallback (`assign_speakers`), script-aware multilingual tokenization (`tokenize_multilingual_text`), and 4,000-character chunked prompt building (`ChunkedPromptBuilder`).
+4. **Multilingual DiarizationLM Post-Processing & `LG-TPST` (`diarizers.llm` & `diarizers.alignment`)**: Post-processing via **[`diarizers-community/DiarizationLM-Gemma-4-12B-v1`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-12B-v1)** (highest accuracy, default in `best-quality` and `max`) and **[`diarizers-community/DiarizationLM-Gemma-4-E4B-v2`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v2)** (`2×` faster & half the RAM in `fast`), supporting automatic 4-bit `Q4_K_M` GGUF inference on CPU via `llama.cpp` and `bfloat16` Safetensors on GPU via Hugging Face `transformers`, paired with **Myers' (1999) bit-parallel exact word-level Levenshtein alignment (`tpst_align`)**, Hungarian inter-chunk permutation reconciliation, and **Locality-Gated Transcript-Preserving Speaker Transfer (`LG-TPST`)**.
 
 > **Archival Note**: All functionality from the experimental [`diarizers-community/DiarizersLM`](https://github.com/diarizers-community/DiarizersLM) repository has been folded into and superseded by `diarizers` (`v1.0.0+`).
 
-`diarizers` (`v1.0.1`) implements and extends the algorithms described in:
+`diarizers` (`v1.1.0`) implements and extends the algorithms described in:
 - **DiarizationLM**: Quan Wang, Yiling Huang, Guanlong Zhao, Evan Clark, Wei Xia, Hank Liao, *"DiarizationLM: Speaker Diarization Post-Processing with Large Language Models"*, **Interspeech 2024** ([arXiv:2401.03506](https://arxiv.org/abs/2401.03506)).
 - **Turn-to-Diarize**: Wei Xia, Han Lu, Quan Wang, Anshuman Tripathi, Yiling Huang, Ignacio Lopez Moreno, Hasim Sak, *"Turn-to-Diarize: Online Speaker Diarization Constrained by Transformer Transducer Speaker Turn Detection"*, **ICASSP 2022** ([arXiv:2109.11641](https://arxiv.org/abs/2109.11641)).
 - **SpectralCluster**: Quan Wang, Carlton Downey, Li Wan, Philip Andrew Mansfield, Ignacio Lopez Moreno, *"Speaker Diarization with LSTM"*, **ICASSP 2018** ([arXiv:1710.10468](https://arxiv.org/abs/1710.10468)).
+
+---
+
+## Configurable Pipeline Profiles (`best-quality`, `max`, `fast`, `acoustic-only`)
+
+Because speaker encoders (`ECAPA` `20.8M` vs. `FlaxSpeaker-XL` `64.4M`, **`13×` CPU speed difference**) and DiarizationLM sizes (`Gemma-4-E4B-v2` vs. `Gemma-4-12B-v1`, **`2×` CPU speed and `2×` RAM difference**) span a wide compute-cost spectrum for closely matched accuracy, `diarizers` exposes four readable high-level profiles via `profile=...` (Python) and `--profile ...` (CLI):
+
+| Profile (`--profile` / `profile=`) | Aliases | Stage 2 Acoustic Diarizer (`powerset_ward`) | Stage 4 DiarizationLM | 211-Test Micro / Macro WDER (%) | 11-Lang `i18n` WDER (%) | CPU Cost (`Q4_K_M` GGUF) | Best For |
+| :--- | :--- | :--- | :--- | :---: | :---: | :--- | :--- |
+| **`"best-quality"`** *(default)* | `best`, `quality`, `default` | `ECAPA-TDNN` (`20.8M`, `30 ms/seg` CPU) | **`DiarizationLM-Gemma-4-12B-v1`** | **3.88** / 5.25 *(Raw: 3.90 / **5.18**)* | **20.55** | `~14.3 GiB` RAM, `7.5–8.0 tok/s` | **Default best overall accuracy** (`>= 24 GiB` RAM or GPU) |
+| **`"max"`** | `flaxspeaker`, `gpu` | **`FlaxSpeaker-XL`** (`64.4M`, `394 ms/seg` CPU) | **`DiarizationLM-Gemma-4-12B-v1`** | 3.90 / 5.20 *(Raw: 3.93 / **5.18**; **3.49%** CALLHOME, **6.33%** ICSI)* | **20.55** | `~14.6 GiB` RAM + heavier encoder | **GPU deployments & unconstrained `1–10` speaker meetings** |
+| **`"fast"`** | `balanced`, `lite`, `cpu` | `ECAPA-TDNN` (`20.8M`, `30 ms/seg` CPU) | **`DiarizationLM-Gemma-4-E4B-v2`** | **4.13 / 5.49** | **20.83** *(Raw: 20.87)* | **`~7.6 GiB` RAM, `15.4 tok/s` (`2×` faster)** | **16 GiB RAM laptops, CPU servers & Hugging Face CPU Spaces** |
+| **`"acoustic-only"`** | `no-llm`, `realtime` | `ECAPA-TDNN` (`20.8M`, `30 ms/seg` CPU) | `None` *(disabled)* | 5.65 / 6.96 | 21.43 | **`< 2.0 GiB` RAM, no LLM latency** | **Ultra-low-resource / real-time CPU transcription** |
 
 ---
 
@@ -66,22 +82,23 @@ Audio (WAV / FLAC / MP3 / 16 kHz mono NumPy array)
   │      └── WhisperWordASR (openai/whisper-large-v3-turbo) or AudioCppASR (Qwen3-ASR)
   │            ──> WordSegments [start, end, word]
   │
-  └──> Stage 2: Speaker Diarization Backend (diarizers.diarization & diarizers.spectral)
-         ├── PyanNetSegmentation (pyannote/segmentation-3.0 neural powerset activity curves)
-         ├── SpeechBrainECAPATDNN (speechbrain/spkrec-ecapa-voxceleb 192-d embeddings)
-         └── SpectralClusterer (Symmetric Normalized Laplacian L_sym + boundary flux snapping)
-               ──> SpeakerTurns [start, end, speaker]
+  └──> Stage 2: Powerset Speaker Diarization Backend (diarizers.diarization, flaxspeaker_encoder & spectral)
+         ├── PyanNetSegmentation (pyannote/segmentation-3.0 overlapping 10s powerset clean-speaker masks)
+         ├── Speaker Encoder: SpeechBrainECAPATDNN (best-quality/fast) or FlaxSpeakerERes2Conformer (max)
+         └── powerset_ward: Ward Auto-K + Cannot-Link Cosine EM + Balanced Centering + Soft Powerset Stitching
+               (or legacy diarization_mode="sliding_spectral" Symmetric Normalized Laplacian SpectralClusterer)
+               ──> Frame Speaker Posteriors P(t, k) & SpeakerTurns [start, end, speaker]
                      │
                      ▼
-       Stage 3: Word-to-Turn Alignment & Chunked Prompt Builder (diarizers.alignment)
-         ├── assign_speakers (Maximal overlap + nearest-turn midpoint fallback)
-         └── ChunkedPromptBuilder (4,000-char windows, Gemma-4 turn formatting)
+       Stage 3: Soft Posterior Alignment & Chunked Prompt Builder (diarizers.alignment)
+         ├── assign_speakers_from_probs / assign_speakers (Sub-ms soft posterior integration + midpoint fallback)
+         └── ChunkedPromptBuilder (4,000-char or UTF-8 byte windows, Gemma-4 turn formatting)
                      │
                      ▼
        Stage 4: DiarizationLM Post-Processing & LG-TPST (diarizers.llm & diarizers.alignment)
-         ├── DiarizationLMRefiner (diarizers-community/DiarizationLM-Gemma-4-E4B-v1)
-         │     ├── CPU Backend: llama-cpp-python (DiarizationLM-Gemma-4-E4B-v1-q4_k_m.gguf)
-         │     └── GPU/CPU Backend: Hugging Face transformers (model.safetensors)
+         ├── DiarizationLMRefiner (12B-v1 in 'best-quality'/'max' | E4B-v2 in 'fast')
+         │     ├── CPU Auto Backend: llama-cpp-python (Q4_K_M GGUF + flash_attn)
+         │     └── GPU Backend: Hugging Face transformers (bfloat16 model.safetensors)
          ├── Hungarian Inter-Chunk Speaker Permutation Reconciliation
          ├── Myers' (1999) Bit-Parallel Exact Word-Level Levenshtein TPST (tpst_align)
          └── Locality-Gated Speaker Transfer (LG-TPST)
@@ -92,7 +109,7 @@ Audio (WAV / FLAC / MP3 / 16 kHz mono NumPy array)
 
 ---
 
-## Why 2024 `DiarizersLM` Had 43.99%–56.79% WDER & How `diarizers` (`v1.0.1`) Solves It
+## Why 2024 `DiarizersLM` Had 43.99%–56.79% WDER & How `diarizers` Solves It
 
 In the 2024 experimental `DiarizersLM` prototype (`distil-whisper/distil-large-v3` + `pyannote/speaker-diarization-3.1` + `Llama-2-7b`), Word Diarization Error Rate (WDER) degraded to **43.99% on Fisher** and **56.79% on AMI** (nearly random guessing on 2-speaker telephone calls). A systematic audit identified six compounding root causes, all resolved in `diarizers` (`v1.0.1`):
 
@@ -114,7 +131,50 @@ All metrics below are **micro-averaged** across the full evaluation splits (`172
 
 *(Note: In accordance with dataset licensing policies, raw LDC/benchmark audio and intermediate decoded transcripts are not redistributed in this repository.)*
 
-### Table 1: Open-Source Frontend (`diarizers` v1.0.1) + `DiarizationLM-Gemma-4-E4B-v1`
+### What's New in `v1.1.0`: `powerset_ward` Acoustic Frontend, FlaxSpeaker & `E4B-v2` / `12B-v1`
+
+`diarizers` `v1.1.0` upgrades both the **acoustic diarization frontend** and the **DiarizationLM post-processor** (cutting end-to-end **Macro WDER from `12.67% → 5.18%` (`-59.1%` rel.)** and **Micro WDER from `7.10% → 3.88%` (`-45.4%` rel.)** across all 211 held-out benchmark recordings):
+
+1. **Overlapping Powerset-Masked Track Clustering (`powerset_ward`)**: Replaces noisy sliding-window spectral clustering with overlapping `10s` (`step=2.5s`) `pyannote/segmentation-3.0` clean single-speaker tracks (`cls == s_local + 1`, `min_clean_sec=1.0s`), **recording-level active-speech CMVN**, **Ward linkage + closest-centroid cosine auto-`K`**, **per-chunk Hungarian cannot-link cosine EM**, **balanced speaker-centroid centering** ($\mu_{\text{bal}} = \frac{1}{K}\sum_k c_k$, avoiding hub collapse on imbalanced multi-party meetings; `-0.21 pp`, `p < 0.00001`), and **two-pass uniform soft powerset stitching** with `0.25s` Gaussian smoothing (`-0.42 pp`, `p < 0.00001`). Legacy `diarization_mode="sliding_spectral"` remains available.
+2. **Standalone Pure-PyTorch `FlaxSpeaker` `SimAM-ERes2Conformer` Support (`diarizers.flaxspeaker_encoder`)**: Loads [`wq2012/FlaxSpeaker`](https://github.com/wq2012/FlaxSpeaker) SafeTensors checkpoints (`univ_full_eres2conformer_large`, `v2_large`, `xl`, and `*_pfas` `Hybrid-PFAS`) natively in PyTorch with zero JAX/Flax dependency (`cos = 1.0000000` float32 neural parity with native JAX). New presets: `FLAXSPEAKER_LARGE_PRESET`, `FLAXSPEAKER_V2_PRESET`, `FLAXSPEAKER_XL_PRESET`, and `UNIVERSAL_AUTO_PRESET`.
+3. **Full `DiarizationLM-Gemma-4-E4B-v2` & `12B-v1` Support (`diarizers.llm`, `export.py`, `train.py`)**:
+   - Automatic `Q4_K_M` GGUF filename resolution, `backend="auto"` CPU GGUF selection, & `flash_attn=True` (with legacy fallback).
+   - Native `gemma4_unified` (`12B-v1`) Transformers dispatch via `load_hf_diarizationlm_model`.
+   - Configurable high-level profiles (`profile="best-quality"` defaulting to **`DiarizationLM-Gemma-4-12B-v1` + `ECAPA`**, `profile="max"` with **`FlaxSpeaker-XL` + `12B-v1`**, `profile="fast"` with **`E4B-v2` + `ECAPA`**, and `profile="acoustic-only"`).
+   - Control-token / thought-block stripping (`strip_control_tokens`), script-aware CJK/SEA tokenization (`tokenize_multilingual_text`), UTF-8 byte-budget chunking (`use_byte_budget=True`), and optional chunk word-edit-rate hallucination fallback (`max_chunk_word_edit_rate`).
+
+### Table 0: End-to-End `diarizers` `v1.1.0` (`powerset_ward`) Benchmark (`211` Held-Out Test Recordings, `bfloat16`)
+
+All speaker counts are estimated **automatically without oracle `K`** (`FISHER` `K=2` telephony preset, `CALLHOME` `[2..6]`, `ICSI` `[2..10]`, `AMI` `[3..5]`). All `powerset_ward` hyperparameters were locked on a disjoint 60-recording dev set before blind held-out evaluation.
+
+| Frontend + DiarizationLM (`Mode`) | Fisher (172) WDER / cpWER (%) | CALLHOME (20) WDER / cpWER (%) | ICSI (3) WDER / cpWER (%) | AMI (16) WDER / cpWER (%) | Micro WDER / Macro WDER (%) | SpkCntMAE (Macro) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`v1.0.1` (`sliding_spectral` + `ECAPA`) Base** | 4.35 / 24.78 | 9.42 / 32.42 | 23.48 / 59.55 | 20.68 / 51.44 | 8.64 / 14.48 | 1.018 |
+| `v1.0.1` + `E4B-v1` (`Raw-TPST`) | 2.64 / 21.96 | 4.84 / 25.87 | 23.11 / 59.44 | 20.09 / 50.91 | 7.10 / 12.67 | 1.018 |
+| `v1.0.1` + `E4B-v1` (`LG-TPST`) | 2.63 / 21.94 | 5.82 / 27.48 | 23.11 / 59.41 | 20.10 / 50.92 | 7.13 / 12.91 | 1.018 |
+| **`v1.1.0` `ECAPA` (`powerset_ward`) Base** | 4.49 / 24.58 | 6.07 / 26.81 | 7.82 / 40.14 | 9.48 / 35.68 | 5.65 / 6.96 | 0.239 |
+| `v1.1.0` `ECAPA` + **`E4B-v1`** (`LG-TPST`) | 2.76 / 22.08 | 4.60 / 25.40 | 6.99 / 39.52 | 8.71 / 35.03 | 4.16 / 5.77 | 0.239 |
+| `v1.1.0` `ECAPA` + **`E4B-v2`** (`LG-TPST`) | 2.86 / 22.16 | 4.05 / 24.85 | 6.59 / 39.25 | 8.45 / 34.84 | 4.13 / 5.49 | 0.239 |
+| `v1.1.0` `ECAPA` + **`12B-v1`** (`Raw-TPST`) | 2.68 / 21.91 | 3.58 / 24.23 | 6.41 / 39.13 | **8.04 / 34.37** | 3.90 / **5.18** | **0.214** |
+| `v1.1.0` `ECAPA` + **`12B-v1`** (`LG-TPST`) | **2.61 / 21.85** | 3.75 / 24.30 | 6.50 / 39.19 | 8.11 / 34.44 | **3.88** / 5.25 | 0.239 |
+| **`v1.1.0` `FlaxSpeaker-XL` (`powerset_ward`) Base** | 4.51 / 24.59 | 5.75 / 26.55 | 7.80 / 40.14 | 9.65 / 35.69 | 5.68 / 6.93 | 0.261 |
+| `v1.1.0` `FlaxSpeaker-XL` + **`E4B-v1`** (`LG-TPST`) | 2.80 / 22.10 | 4.34 / 25.05 | 7.05 / 39.56 | 8.78 / 34.95 | 4.19 / 5.74 | 0.249 |
+| `v1.1.0` `FlaxSpeaker-XL` + **`E4B-v2`** (`LG-TPST`) | 2.84 / 22.15 | 4.13 / 24.82 | 6.66 / 39.31 | 8.66 / 34.93 | 4.16 / 5.57 | 0.249 |
+| `v1.1.0` `FlaxSpeaker-XL` + **`12B-v1`** (`Raw-TPST`) | 2.69 / 21.91 | **3.49** / 24.30 | **6.33 / 39.05** | 8.22 / 34.46 | 3.93 / **5.18** | 0.236 |
+| `v1.1.0` `FlaxSpeaker-XL` + **`12B-v1`** (`LG-TPST`) | 2.65 / 21.87 | 3.57 / 24.33 | 6.39 / 39.08 | 8.19 / 34.43 | 3.90 / 5.20 | 0.249 |
+
+*All `cpWER` values above use the **full all-speaker reference denominator** (`FISHER=323,413`, `CALLHOME=18,957`, `ICSI=33,255`, `AMI=88,826` words, counting unmapped reference speakers as full deletions). Across all 211 test utterances (`10,000`-resample paired cluster bootstrap): **`12B-v1` vs `E4B-v2` (`LG-TPST`)** yields **`ΔWDER = -0.25 pp [-0.36, -0.15], p < 0.00001`** on `ECAPA` and **`-0.26 pp [-0.36, -0.16], p < 0.00001`** on `FlaxSpeaker-XL`; **`v1.1.0` `ECAPA` vs `FlaxSpeaker-XL`** is statistically tied (`Δ = +0.02 pp, p = 0.649`), while `ECAPA` runs **`9–13×` faster on CPU** (`30.3 ms/seg` vs `267–394 ms/seg`) and `FlaxSpeaker-Large` (`31.8M`) achieves the lowest acoustic `SpkCntMAE` (`0.116`, `0.000` on ICSI) and strongest unconstrained `K ∈ [1..10]` auto-clustering (`6.43%` vs `6.72%` micro WDER).*
+
+**Multilingual `DiarizationLM` Comparison & CPU `Q4_K_M` Cost**:
+
+| Model (`Apache-2.0`) | `i18n_open_eval` (20 sets, 2,147 utts) Micro / Macro WDER (%) | `Q4_K_M` File Size | Peak CPU RSS (`n_ctx=6144`) | CPU Speed (`32` threads) | Recommended Role |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| Baseline (`v1.0.1` open frontend) | 21.43 / 20.58 | — | — | — | — |
+| `DiarizationLM-Gemma-4-E4B-v1` | 21.57 / 20.72 *(regresses non-EN)* | 5.30 GB | `7.59 GiB` | `15.1 tok/s` | Legacy (superseded by `E4B-v2`) |
+| **`DiarizationLM-Gemma-4-E4B-v2`** | **20.87 / 20.01** *(LG: **20.83 / 19.98**)* | 5.30 GB | **`7.58 GiB`** | **`15.4 tok/s`** | **`profile="fast"` (16 GiB RAM / CPU / Spaces)** |
+| **`DiarizationLM-Gemma-4-12B-v1`** | **20.55 / 19.70** *(wins 19/20 sets)* | 7.38 GB | **`14.29 GiB`** | `7.5–8.0 tok/s` | **`profile="best-quality"` (Default) & `"max"`** |
+
+### Table 1: Open-Source Frontend (`diarizers` v1.0.1 Legacy Baseline) + `DiarizationLM-Gemma-4-E4B-v1`
 
 Open-source pipeline configuration:
 - **ASR**: [`openai/whisper-large-v3-turbo`](https://huggingface.co/openai/whisper-large-v3-turbo) (`WhisperWordASR`, MIT License)
@@ -206,23 +266,23 @@ pip install -e ".[audio,llm,dev]"
 
 ### 1. One-Liner End-to-End Python API (`DiarizersPipeline.from_pretrained`)
 
-Run the full 4-stage pipeline (`Whisper-large-v3-turbo` ASR + `pyannote/segmentation-3.0` + `SpeechBrainECAPATDNN` + `SpectralClusterer` + `DiarizationLM-Gemma-4-E4B-v1`) on any WAV/MP3 file or 16 kHz NumPy waveform:
+Run the full 4-stage pipeline on any WAV/MP3/FLAC file or 16 kHz NumPy waveform using a high-level `profile` (`"best-quality"`, `"max"`, `"fast"`, or `"acoustic-only"`):
 
 ```python
 import diarizers
 
-# CPU mode using the 4-bit Q4_K_M GGUF checkpoint from Hugging Face Hub:
-pipe = diarizers.DiarizersPipeline.from_pretrained(
-    asr_model="openai/whisper-large-v3-turbo",
-    diarizer_preset=diarizers.FISHER_TELEPHONY_PRESET,
-    llm_model_or_path="diarizers-community/DiarizationLM-Gemma-4-E4B-v1",
-    llm_gguf_filename="DiarizationLM-Gemma-4-E4B-v1-q4_k_m.gguf",
-    llm_backend="gguf",
-    device="cpu",
-)
+# 1. Default ("best-quality"): Whisper-large-v3-turbo + ECAPA powerset_ward + Gemma-4-12B-v1
+#    On CPU, backend="auto" automatically uses the quantized Q4_K_M GGUF when llama-cpp-python is installed!
+pipe = diarizers.DiarizersPipeline.from_pretrained()
 
-# Pass num_speakers=2 if known, or num_speakers=None to auto-detect via eigengap
-transcript = pipe("conversation.wav", num_speakers=2)
+# 2. Or select a speed / hardware profile:
+#    - profile="fast":          2x faster LLM & ~7.6 GiB RAM (ECAPA + Gemma-4-E4B-v2)
+#    - profile="max":           FlaxSpeaker-XL + Gemma-4-12B-v1 (best multi-speaker, ideal on GPU)
+#    - profile="acoustic-only": ECAPA powerset_ward without LLM (<2 GiB RAM)
+pipe_fast = diarizers.DiarizersPipeline.from_pretrained(profile="fast")
+
+# Pass num_speakers=2 if known, or num_speakers=None to auto-detect (1..10 speakers)
+transcript = pipe("conversation.wav", num_speakers=None)
 
 # Export in multiple standard formats:
 print(transcript.to_diarized_text())                  # "<speaker:1> hello ... <speaker:2> hi ..."
@@ -235,10 +295,7 @@ To run on a **CUDA GPU** with 16-bit `bfloat16` Hugging Face `transformers` weig
 
 ```python
 pipe_gpu = diarizers.DiarizersPipeline.from_pretrained(
-    asr_model="openai/whisper-large-v3-turbo",
-    diarizer_preset=diarizers.CALLHOME_TELEPHONY_PRESET,  # Auto speaker count [2..6]
-    llm_model_or_path="diarizers-community/DiarizationLM-Gemma-4-E4B-v1",
-    llm_backend="transformers",
+    profile="max",  # FlaxSpeaker SimAM-ERes2Conformer-XL + DiarizationLM-Gemma-4-12B-v1
     device="cuda:0",
 )
 transcript = pipe_gpu("callhome_sample.wav", num_speakers=None)
@@ -246,7 +303,7 @@ transcript = pipe_gpu("callhome_sample.wav", num_speakers=None)
 
 ### 2. Modular End-to-End Python API (`DiarizationPipeline`)
 
-You can also customize each stage independently (for example, choosing among `FISHER_TELEPHONY_PRESET`, `CALLHOME_TELEPHONY_PRESET`, `MEETING_MULTISPK_PRESET`, or setting `segmentation_model="none"` for pure sliding-window `ECAPA-TDNN + SpectralClusterer`):
+You can also customize each stage independently (for example, choosing among `UNIVERSAL_AUTO_PRESET`, `FLAXSPEAKER_XL_PRESET`, `FLAXSPEAKER_LARGE_PRESET`, `FISHER_TELEPHONY_PRESET`, `CALLHOME_TELEPHONY_PRESET`, `AMI_MEETING_PRESET`, `MEETING_MULTISPK_PRESET`, or setting `diarization_mode="sliding_spectral"`):
 
 ```python
 from diarizers import (
@@ -259,20 +316,19 @@ from diarizers import (
 
 preset = DiarizationPreset(
     name="custom_meeting",
-    segmentation_model="pyannote/segmentation-3.0",  # Or "none" for sliding-window only
-    encoder_name="speechbrain/spkrec-ecapa-voxceleb",
+    segmentation_model="pyannote/segmentation-3.0",
+    encoder_name="speechbrain/spkrec-ecapa-voxceleb",  # Or "wq2012/univ_full_eres2conformer_xl"
+    diarization_mode="powerset_ward",
     min_clusters=2,
     max_clusters=8,
-    eigen_threshold=0.45,
 )
 
 pipeline = DiarizationPipeline(
     asr=WhisperWordASR("openai/whisper-large-v3-turbo", device="cpu"),
     diarizer=ECAPASpectralDiarizer(preset=preset, device="cpu"),
     llm_refiner=DiarizationLMRefiner(
-        model_path_or_repo="diarizers-community/DiarizationLM-Gemma-4-E4B-v1",
-        gguf_filename="DiarizationLM-Gemma-4-E4B-v1-q4_k_m.gguf",
-        backend="gguf",
+        model_path_or_repo="diarizers-community/DiarizationLM-Gemma-4-12B-v1",
+        backend="auto",  # Auto-selects Q4_K_M GGUF on CPU when llama-cpp-python is installed
     ),
     use_locality_gate=True,
 )
@@ -281,17 +337,15 @@ result = pipeline("meeting.wav")
 print(result.to_diarized_text())
 ```
 
-### 3. Post-Processing Any Diarized Transcript with `DiarizationLM-Gemma-4-E4B-v1`
+### 3. Post-Processing Any Diarized Transcript with `DiarizationLM`
 
-If you already have a diarized transcript from any ASR + diarization system (`<speaker:1> ... <speaker:2> ...`), you can refine its speaker labels directly using `DiarizationLMRefiner` and `locality_gated_speaker_transfer` (`LG-TPST`) or `transcript_preserving_speaker_transfer` (`TPST`):
+If you already have a diarized transcript from any ASR + diarization system (`<speaker:1> ... <speaker:2> ...`), you can refine its speaker labels directly using `DiarizationLMRefiner` (`12B-v1` or `E4B-v2`) and `locality_gated_speaker_transfer` (`LG-TPST`) or `transcript_preserving_speaker_transfer` (`TPST`):
 
 ```python
 from diarizers import (
     DiarizationLMRefiner,
     create_diarized_text,
     extract_text_and_spk,
-    locality_gated_speaker_transfer,
-    transcript_preserving_speaker_transfer,
 )
 
 hyp_diarized = (
@@ -300,9 +354,8 @@ hyp_diarized = (
 )
 
 refiner = DiarizationLMRefiner(
-    model_path_or_repo="diarizers-community/DiarizationLM-Gemma-4-E4B-v1",
-    gguf_filename="DiarizationLM-Gemma-4-E4B-v1-q4_k_m.gguf",
-    backend="gguf",  # Or backend="transformers", device="cuda:0"
+    model_path_or_repo="diarizers-community/DiarizationLM-Gemma-4-12B-v1",  # Or E4B-v2 for fast CPU
+    backend="auto",  # Uses Q4_K_M GGUF on CPU or bfloat16 transformers on GPU
 )
 
 # High-level helper returning (raw_tpst_spk, lg_tpst_spk, raw_completions):
@@ -318,17 +371,21 @@ print("Refined (Raw-TPST):", create_diarized_text(hyp_text.split(), raw_tpst_spk
 Installing `diarizers` registers the `diarizers` console script with five subcommands (`run`/`infer`, `prepare-sft-data`/`prepare-data`, `train`, `export`, `evaluate`):
 
 ```bash
-# 1. Transcribe, diarize, and post-process an audio file:
+# 1a. Best-quality default (Whisper-large-v3-turbo + ECAPA powerset_ward + Gemma-4-12B-v1):
 diarizers run \
   --audio conversation.wav \
-  --asr-model openai/whisper-large-v3-turbo \
-  --preset telephony \
-  --num-speakers 2 \
-  --llm-model diarizers-community/DiarizationLM-Gemma-4-E4B-v1 \
-  --gguf-file DiarizationLM-Gemma-4-E4B-v1-q4_k_m.gguf \
   --output-json output_transcript.json \
   --output-rttm output_transcript.rttm \
   --output-srt output_transcript.srt
+
+# 1b. Fast / 16 GiB CPU laptop profile (ECAPA powerset_ward + Gemma-4-E4B-v2, ~2x faster LLM):
+diarizers run --audio conversation.wav --profile fast --output-srt output_fast.srt
+
+# 1c. Max multi-speaker GPU profile (FlaxSpeaker-XL + Gemma-4-12B-v1):
+diarizers run --audio meeting.wav --profile max --device cuda:0 --output-rttm meeting.rttm
+
+# 1d. Acoustic-only profile (<2 GiB RAM, no LLM):
+diarizers run --audio conversation.wav --profile acoustic-only --output-rttm acoustic.rttm
 
 # 2. Prepare SFT training prompts (hyp2ora + deg2ref + Locality-Preserving Oracle):
 diarizers prepare-sft-data \
@@ -357,7 +414,8 @@ diarizers evaluate \
 ```
 
 Standalone scripts are also provided in [`scripts/`](scripts/):
-- `python scripts/inference.py --audio conversation.wav --num_speakers 2 --output_json out.json`
+- `python scripts/inference.py --audio conversation.wav --profile best-quality --output_json out.json`
+- `python scripts/inference.py --audio conversation.wav --profile fast --output_srt out_fast.srt`
 - `python scripts/prepare_data.py --input_json train_utts.json --output_json sft_train.json`
 - `python scripts/train.py --train_json sft_train.json --output_dir ./lora_ckpt`
 - `python scripts/export_model.py --model_dir ./lora_ckpt --output_dir ./merged_hf --base_model google/gemma-4-E4B --output_gguf model-q4_k_m.gguf`
@@ -373,7 +431,7 @@ You can fine-tune your own DiarizationLM model on custom domain data in three st
    - `hyp_spk_locality_oracle`: Locality-preserving oracle targets that teach the LLM to fix short turn-boundary and backchannel errors (`1 <= L <= 5` words) while preserving acoustic speaker anchors on long monologues (`L >= 6` words).
    - `ref_spk_degraded`: Synthetically degraded speaker boundaries on `ref_text` (`deg2ref` flavor) for data augmentation.
 2. **LoRA Supervised Fine-Tuning (`diarizers.train` / `scripts/train.py`)**:
-   Fine-tunes `google/gemma-4-E4B` (or `diarizers-community/DiarizationLM-Gemma-4-E4B-v1`) using completion-only cross-entropy loss on 4,000-character prompt chunks formatted with Gemma-4 turn tags (`<|turn>user\n{prompt} --> <turn|>\n<|turn>model\n{completion} [eod]`).
+   Fine-tunes `google/gemma-4-E4B` or `google/gemma-4-12B` using completion-only cross-entropy loss on 4,000-character prompt chunks formatted with Gemma-4 turn tags (`<|turn>user\n{prompt} --> <turn|>\n<|turn>model\n{completion} [eod]`).
 3. **Merge & Quantize to GGUF (`diarizers.export` / `scripts/export_model.py`)**:
    Merges LoRA adapters into 16-bit `bfloat16` Safetensors and optionally invokes `llama.cpp` to export a 4-bit `Q4_K_M` GGUF file for fast CPU inference.
 
@@ -404,11 +462,11 @@ print(f"cpWER: {metrics['cpWER'] * 100:.2f}%")
 print(f"SpkCntMAE: {metrics['SpkCntMAE']:.3f}")
 ```
 
-### 7. Interactive CPU Gradio Demo (`hf_space/app.py`)
+### 7. Interactive CPU Demos (`hf_space/app.py` & `hf_space/index.html`)
 
 Two hosted interactive Spaces are available on Hugging Face:
-- **End-to-End Audio Pipeline Demo**: [`https://huggingface.co/spaces/diarizers-community/diarizers`](https://huggingface.co/spaces/diarizers-community/diarizers) — Upload or select multi-speaker conversation audio and inspect the acoustic diarization baseline, `DiarizationLM-Gemma-4-E4B-v1` (`LG-TPST`) refined transcript, NIST RTTM, and SRT subtitles.
-- **Text-Only DiarizationLM GGUF Demo**: [`https://huggingface.co/spaces/diarizers-community/DiarizationLM-GGUF`](https://huggingface.co/spaces/diarizers-community/DiarizationLM-GGUF) — Paste any diarized transcript (`<speaker:1> ... <speaker:2> ...`) and stream `DiarizationLM-Gemma-4-E4B-v1` (`Q4_K_M` GGUF) speaker boundary refinement on CPU.
+- **End-to-End Audio Pipeline Demo**: [`https://huggingface.co/spaces/diarizers-community/diarizers`](https://huggingface.co/spaces/diarizers-community/diarizers) — Upload or select multi-speaker conversation audio, switch between **`Best Quality` (`12B-v1`)**, **`Max` (`FlaxSpeaker-XL + 12B-v1`)**, **`Fast` (`E4B-v2`)**, and **`Acoustic Only`**, and inspect the acoustic baseline, refined transcript, NIST RTTM, and SRT subtitles.
+- **Text-Only DiarizationLM GGUF Demo**: [`https://huggingface.co/spaces/diarizers-community/DiarizationLM-GGUF`](https://huggingface.co/spaces/diarizers-community/DiarizationLM-GGUF) — Paste any multilingual diarized transcript (`<speaker:1> ... <speaker:2> ...`), select `Fast (Gemma-4-E4B-v2)` or `Best Quality (Gemma-4-12B-v1)` (`Q4_K_M` GGUF), and stream speaker boundary refinement on CPU.
 
 To launch the end-to-end audio Gradio demo locally on CPU:
 
@@ -440,11 +498,12 @@ All training and evaluation scripts use the standard DiarizationLM JSON format (
 ```text
 diarizers/
 ├── src/diarizers/
-│   ├── __init__.py          # Public API exports (v1.0.1)
+│   ├── __init__.py          # Public API exports (v1.1.0)
 │   ├── types.py             # WordSegment, SpeakerTurn, DiarizedTranscript (RTTM/VTT/SRT/JSON)
-│   ├── configs.py           # PromptConfig and acoustic DiarizationPresets
-│   ├── spectral.py          # Clean-room Symmetric Normalized Laplacian SpectralClusterer
-│   ├── diarization.py       # Standalone PyTorch PyanNetSegmentation, SpeechBrainECAPATDNN & ECAPASpectralDiarizer
+│   ├── configs.py           # PromptConfig and acoustic DiarizationPresets (incl. FlaxSpeaker & auto)
+│   ├── spectral.py          # SpectralClusterer, Ward auto-K, balanced centering & cosine EM
+│   ├── flaxspeaker_encoder.py # Pure-PyTorch FlaxSpeaker SimAM-ERes2Conformer + Hybrid-PFAS encoder
+│   ├── diarization.py       # PyanNetSegmentation, SpeechBrainECAPATDNN, powerset_ward & ECAPASpectralDiarizer
 │   ├── asr.py               # WhisperWordASR (default openai/whisper-large-v3-turbo), AudioCppASR (Qwen3-ASR GGUF), PrecomputedASR
 │   ├── alignment.py         # assign_speakers, Myers bit-parallel TPST, LG-TPST, ChunkedPromptBuilder
 │   ├── dataprep.py          # Dual-flavor (hyp2ora + deg2ref) + Locality-Preserving SFT builder
@@ -467,7 +526,7 @@ diarizers/
 │   ├── README.md            # Hugging Face Space metadata & documentation
 │   └── requirements.txt     # CPU Space dependencies
 ├── docs/
-│   └── blog_post.md         # Technical deep-dive blog post on diarizers v1.0.1 & Gemma-4
+│   └── blog_post.md         # Technical deep-dive blog post on diarizers v1.1.0 & Gemma-4
 └── tests/
     └── test_diarizers.py    # Comprehensive unit & regression test suite
 ```
@@ -476,8 +535,13 @@ diarizers/
 
 ## Pretrained Models on Hugging Face
 
-- **DiarizationLM (Gemma 4 E4B, Multi-Domain, Safetensors + `Q4_K_M` GGUF, Apache-2.0)**:
-  - [`diarizers-community/DiarizationLM-Gemma-4-E4B-v1`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v1)
+- **DiarizationLM (Gemma 4, Multilingual, Safetensors + `Q4_K_M` GGUF, Apache-2.0)**:
+  - **Default `best-quality` / `max` (`14.3 GiB` CPU RAM / GPU `bfloat16`, `3.88%` WDER)**: [`diarizers-community/DiarizationLM-Gemma-4-12B-v1`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-12B-v1)
+  - **Fast CPU `fast` profile (`7.6 GiB` CPU RAM, `2×` faster, `4.13%` WDER)**: [`diarizers-community/DiarizationLM-Gemma-4-E4B-v2`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v2)
+  - Legacy v1 (`en`-only): [`diarizers-community/DiarizationLM-Gemma-4-E4B-v1`](https://huggingface.co/diarizers-community/DiarizationLM-Gemma-4-E4B-v1)
+- **Speaker Encoders (Standalone PyTorch, Apache-2.0)**:
+  - Default fast CPU encoder: [`speechbrain/spkrec-ecapa-voxceleb`](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb)
+  - Optional [`FlaxSpeaker`](https://github.com/wq2012/FlaxSpeaker) `SimAM-ERes2Conformer` encoders: `wq2012/univ_full_eres2conformer_large`, `wq2012/univ_full_eres2conformer_v2_large`, `wq2012/univ_full_eres2conformer_xl`
 - **Fine-Tuned `pyannote/segmentation-3.0` (`PyanNet`) Checkpoints (MIT)**:
   - [`diarizers-community/speaker-segmentation-fine-tuned-callhome-eng`](https://huggingface.co/diarizers-community/speaker-segmentation-fine-tuned-callhome-eng)
   - [`diarizers-community/speaker-segmentation-fine-tuned-callhome-jpn`](https://huggingface.co/diarizers-community/speaker-segmentation-fine-tuned-callhome-jpn)

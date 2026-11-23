@@ -1,4 +1,4 @@
-"""Package setup for diarizers v1.0.1."""
+"""Package setup for diarizers v1.1.0."""
 
 from setuptools import find_packages
 from setuptools import setup
@@ -39,7 +39,7 @@ EXTRAS_REQUIRE = {
 
 setup(
     name="diarizers",
-    version="1.0.1",
+    version="1.1.0",
     description=(
         "Unified Open-Source ASR, Speaker Diarization, and DiarizationLM "
         "Post-Processing Pipeline"
