@@ -1,6 +1,6 @@
-"""Diarizers v1.1.0: Open-Source ASR, Speaker Diarization, and DiarizationLM."""
+"""Diarizers v1.2.0: Open-Source ASR, Speaker Diarization, and DiarizationLM."""
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 from diarizers.alignment import (
     ChunkedPromptBuilder,
@@ -32,12 +32,17 @@ from diarizers.configs import (
     ACOUSTIC_ONLY_PROFILE,
     AMI_MEETING_PRESET,
     ASRConfig,
+    BALANCED_PROFILE,
     BEST_QUALITY_PROFILE,
     CALLHOME_TELEPHONY_PRESET,
     DEFAULT_ASR_CONFIG,
     DEFAULT_DIARIZERS_CONFIG,
     DEFAULT_FLAXSPEAKER_LARGE_MODEL,
+    DEFAULT_FLAXSPEAKER_V2_DIAR_MODEL,
     DEFAULT_FLAXSPEAKER_V2_MODEL,
+    DEFAULT_FLAXSPEAKER_XL_DIAR_BASE_MODEL,
+    DEFAULT_FLAXSPEAKER_XL_DIAR_MODEL,
+    DEFAULT_FLAXSPEAKER_XL_DIAR_PFAS_MODEL,
     DEFAULT_FLAXSPEAKER_XL_MODEL,
     DEFAULT_LLM_MODEL_12B,
     DEFAULT_LLM_MODEL_V1,
@@ -47,8 +52,11 @@ from diarizers.configs import (
     DiarizersConfig,
     FAST_PROFILE,
     FISHER_TELEPHONY_PRESET,
+    FLAXSPEAKER_DIAR_ECAPA_FUSION_PRESET,
     FLAXSPEAKER_LARGE_PRESET,
+    FLAXSPEAKER_V2_DIAR_PRESET,
     FLAXSPEAKER_V2_PRESET,
+    FLAXSPEAKER_XL_DIAR_PRESET,
     FLAXSPEAKER_XL_PRESET,
     MAX_PROFILE,
     MEETING_MULTISPK_PRESET,
@@ -57,6 +65,7 @@ from diarizers.configs import (
     PipelineProfile,
     PromptConfig,
     UNIVERSAL_AUTO_PRESET,
+    adapt_preset_for_encoder,
     resolve_pipeline_profile,
 )
 from diarizers.dataprep import (
@@ -92,6 +101,8 @@ from diarizers.flaxspeaker_encoder import (
     FlaxSpeakerERes2Conformer,
     compute_flaxspeaker_log_mel,
     compute_hybrid_pfas_similarity_matrix,
+    is_flaxspeaker_diar_config,
+    is_flaxspeaker_diar_model_id,
     is_flaxspeaker_model_id,
 )
 from diarizers.llm import (
@@ -130,13 +141,18 @@ __all__ = [
     "AMI_MEETING_PRESET",
     "ASRConfig",
     "AudioCppASR",
+    "BALANCED_PROFILE",
     "BEST_QUALITY_PROFILE",
     "CALLHOME_TELEPHONY_PRESET",
     "ChunkedPromptBuilder",
     "DEFAULT_ASR_CONFIG",
     "DEFAULT_DIARIZERS_CONFIG",
     "DEFAULT_FLAXSPEAKER_LARGE_MODEL",
+    "DEFAULT_FLAXSPEAKER_V2_DIAR_MODEL",
     "DEFAULT_FLAXSPEAKER_V2_MODEL",
+    "DEFAULT_FLAXSPEAKER_XL_DIAR_BASE_MODEL",
+    "DEFAULT_FLAXSPEAKER_XL_DIAR_MODEL",
+    "DEFAULT_FLAXSPEAKER_XL_DIAR_PFAS_MODEL",
     "DEFAULT_FLAXSPEAKER_XL_MODEL",
     "DEFAULT_LLM_MODEL_12B",
     "DEFAULT_LLM_MODEL_V1",
@@ -152,8 +168,11 @@ __all__ = [
     "ECAPASpectralDiarizer",
     "FAST_PROFILE",
     "FISHER_TELEPHONY_PRESET",
+    "FLAXSPEAKER_DIAR_ECAPA_FUSION_PRESET",
     "FLAXSPEAKER_LARGE_PRESET",
+    "FLAXSPEAKER_V2_DIAR_PRESET",
     "FLAXSPEAKER_V2_PRESET",
+    "FLAXSPEAKER_XL_DIAR_PRESET",
     "FLAXSPEAKER_XL_PRESET",
     "FlaxSpeakerERes2Conformer",
     "MAX_PROFILE",
@@ -177,6 +196,7 @@ __all__ = [
     "UtteranceChunker",
     "WhisperWordASR",
     "WordSegment",
+    "adapt_preset_for_encoder",
     "apply_locality_gated_speaker_transfer",
     "assign_speakers",
     "assign_speakers_from_probs",
@@ -201,6 +221,8 @@ __all__ = [
     "extract_text_and_spk",
     "generate_synthetic_dataset",
     "get_oracle_speakers",
+    "is_flaxspeaker_diar_config",
+    "is_flaxspeaker_diar_model_id",
     "is_flaxspeaker_model_id",
     "l2_normalize_rows",
     "levenshtein_with_edits",

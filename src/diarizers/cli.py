@@ -23,7 +23,12 @@ _PRESET_MAP = {
     "meeting": configs.MEETING_MULTISPK_PRESET,
     "auto": configs.UNIVERSAL_AUTO_PRESET,
     "universal": configs.UNIVERSAL_AUTO_PRESET,
-    "flaxspeaker": configs.FLAXSPEAKER_XL_PRESET,
+    "flaxspeaker": configs.FLAXSPEAKER_XL_DIAR_PRESET,
+    "flaxspeaker-diar": configs.FLAXSPEAKER_XL_DIAR_PRESET,
+    "flaxspeaker-xl-diar": configs.FLAXSPEAKER_XL_DIAR_PRESET,
+    "flaxspeaker-v2-diar": configs.FLAXSPEAKER_V2_DIAR_PRESET,
+    "flaxspeaker-ecapa-fusion": configs.FLAXSPEAKER_DIAR_ECAPA_FUSION_PRESET,
+    "fusion": configs.FLAXSPEAKER_DIAR_ECAPA_FUSION_PRESET,
     "flaxspeaker-large": configs.FLAXSPEAKER_LARGE_PRESET,
     "flaxspeaker-v2": configs.FLAXSPEAKER_V2_PRESET,
     "flaxspeaker-xl": configs.FLAXSPEAKER_XL_PRESET,
@@ -153,13 +158,12 @@ def _cmd_infer(args: argparse.Namespace) -> None:
     preset = prof.diarization
   encoder_override = getattr(args, "encoder_model", None)
   mode_override = getattr(args, "diarization_mode", None)
-  if encoder_override or mode_override:
-    preset_kwargs = {}
-    if encoder_override:
-      preset_kwargs["encoder_name"] = encoder_override
-    if mode_override:
-      preset_kwargs["diarization_mode"] = mode_override
-    preset = dataclasses.replace(preset, **preset_kwargs)
+  if encoder_override:
+    preset = configs.adapt_preset_for_encoder(
+        preset, encoder_override, diarization_mode=mode_override
+    )
+  elif mode_override:
+    preset = dataclasses.replace(preset, diarization_mode=mode_override)
   llm_model = _resolve_cli_llm_model(
       args.llm_model, profile_arg, for_audio=True
   )
@@ -403,7 +407,8 @@ def main(argv: Optional[List[str]] = None) -> None:
         choices=sorted(configs.PIPELINE_PROFILE_ALIASES.keys()),
         help=(
             "High-level quality/speed profile: best-quality (default), "
-            "max (FlaxSpeaker-XL), fast (E4B-v2), or acoustic-only"
+            "max (dual-encoder fusion), balanced (ECAPA + 12B-v1), "
+            "fast (E4B-v2), or acoustic-only"
         ),
     )
     p_inf.add_argument(

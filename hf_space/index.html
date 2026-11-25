@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Diarizers v1.1.0 — End-to-End Audio ASR + Speaker Diarization + DiarizationLM Demo</title>
+  <title>Diarizers v1.2.0 — End-to-End Audio ASR + Speaker Diarization + DiarizationLM Demo</title>
   <style>
     :root {
       --bg: #f8fafc;
@@ -252,12 +252,12 @@
 <body>
   <div class="container">
     <div class="header">
-      <h1>🎙️ Diarizers v1.1.0 — End-to-End Audio ASR, Speaker Diarization &amp; DiarizationLM</h1>
+      <h1>🎙️ Diarizers v1.2.0 — End-to-End Audio ASR, Speaker Diarization &amp; DiarizationLM</h1>
       <p>
         End-to-end open-source (Apache-2.0 / MIT) pipeline combining <b>Stage 1: Whisper ASR</b> (<code>WhisperWordASR</code>),
-        <b>Stage 2: Powerset-Masked Speaker Segmentation + ECAPA / FlaxSpeaker Embeddings + Auto-K Clustering</b> (<code>pyannote/segmentation-3.0</code> + <code>speechbrain/spkrec-ecapa-voxceleb</code> or <code>wq2012/univ_full_eres2conformer_xl</code> + <code>powerset_ward</code>),
+        <b>Stage 2: Powerset-Masked Speaker Segmentation + Diarization-Trained FlaxSpeaker / ECAPA Embeddings + Auto-K Clustering</b> (<code>pyannote/segmentation-3.0</code> + <code>wq2012/univ_full_eres2conformer_xl_diar_adapt</code> / <code>speechbrain/spkrec-ecapa-voxceleb</code> + <code>powerset_ward</code>),
         <b>Stage 3: Soft Posterior Word Alignment</b>, and
-        <b>Stage 4: Multilingual DiarizationLM Post-Processing</b> (<code>DiarizationLM-Gemma-4-12B-v1</code> in <code>best-quality</code>/<code>max</code> or <code>DiarizationLM-Gemma-4-E4B-v2</code> in <code>fast</code> + <code>LG-TPST</code>).
+        <b>Stage 4: Multilingual DiarizationLM Post-Processing</b> (<code>DiarizationLM-Gemma-4-12B-v1</code> in <code>best-quality</code>/<code>max</code>/<code>balanced</code> or <code>DiarizationLM-Gemma-4-E4B-v2</code> in <code>fast</code> + <code>LG-TPST</code>).
       </p>
       <div class="badges">
         <a class="badge-link" href="https://github.com/diarizers-community/diarizers" target="_blank">💻 GitHub (diarizers-community/diarizers)</a>
@@ -283,11 +283,12 @@
 
         <div class="field">
           <label for="profileSelect">2. Pipeline Quality / Speed Profile (<code>--profile</code>)</label>
-          <div class="hint">Switch instantly on built-in examples to compare 12B-v1, FlaxSpeaker-XL, E4B-v2, and Acoustic-Only.</div>
+          <div class="hint">Switch instantly on built-in examples to compare best-quality (FlaxSpeaker-XL-Diar + 12B), max (Dual-Encoder Fusion + 12B), balanced (ECAPA + 12B), fast (E4B-v2), and acoustic-only.</div>
           <select id="profileSelect">
-            <option value="best-quality">best-quality — ECAPA + Gemma-4-12B-v1 (3.88% WDER, Default)</option>
-            <option value="max">max — FlaxSpeaker-XL + Gemma-4-12B-v1 (3.49% CALLHOME / 6.33% ICSI)</option>
-            <option value="fast">fast — ECAPA + Gemma-4-E4B-v2 (4.13% WDER, 2x faster, ~7.6 GiB RAM)</option>
+            <option value="best-quality">best-quality — FlaxSpeaker-XL-Diar-Adapt + Gemma-4-12B-v1 (3.82% WDER, Default)</option>
+            <option value="max">max — FlaxSpeaker-XL-Diar-Adapt + ECAPA Fusion + Gemma-4-12B-v1 (3.79% WDER, 7.92% AMI)</option>
+            <option value="balanced">balanced — ECAPA + Gemma-4-12B-v1 (3.88% WDER, 15x faster encoder)</option>
+            <option value="fast">fast — ECAPA + Gemma-4-E4B-v2 (4.13% WDER, 2x faster LLM, ~7.6 GiB RAM)</option>
             <option value="acoustic-only">acoustic-only — ECAPA powerset_ward (5.65% WDER, &lt;2 GiB RAM, no LLM)</option>
           </select>
         </div>
@@ -304,8 +305,10 @@
         <div class="field">
           <label for="presetSelect">4. Stage 2 — Acoustic Diarization Preset</label>
           <select id="presetSelect">
+            <option value="FlaxSpeaker-XL-Diar-Adapt Auto (powerset_ward)">FlaxSpeaker-XL-Diar-Adapt Auto (segment-CMVN powerset_ward, Auto 1..10)</option>
+            <option value="FlaxSpeaker-XL-Diar + ECAPA Fusion (powerset_ward)">FlaxSpeaker-XL-Diar + ECAPA Fusion (Dual-Encoder powerset_ward, Auto 1..10)</option>
             <option value="Universal Auto (ECAPA powerset_ward)">Universal Auto (ECAPA powerset_ward, Auto 1..10)</option>
-            <option value="FlaxSpeaker-XL Auto (powerset_ward)">FlaxSpeaker-XL Auto (SimAM-ERes2Conformer powerset_ward)</option>
+            <option value="FlaxSpeaker-XL Auto (powerset_ward)">FlaxSpeaker-XL Auto (Legacy SimAM-ERes2Conformer powerset_ward)</option>
             <option value="Fisher Telephony (2 speakers)">Fisher Telephony (2 speakers, K=2)</option>
             <option value="Callhome Telephony (2-6 speakers)">Callhome Telephony (Auto [2..6])</option>
             <option value="AMI Meeting (3-5 speakers)">AMI Meeting (Auto [3..5])</option>
@@ -399,6 +402,12 @@
     const examplesTableBody = document.getElementById("examplesTableBody");
 
     const PRESET_CONFIGS = {
+      "FlaxSpeaker-XL-Diar-Adapt Auto (powerset_ward)": {
+        winSec: 2.0, stepSec: 0.8, minK: 2, maxK: 8, pPct: 75, sigma: 1.5, eigenThreshold: 0.45
+      },
+      "FlaxSpeaker-XL-Diar + ECAPA Fusion (powerset_ward)": {
+        winSec: 2.0, stepSec: 0.8, minK: 2, maxK: 8, pPct: 75, sigma: 1.5, eigenThreshold: 0.45
+      },
       "Universal Auto (ECAPA powerset_ward)": {
         winSec: 2.0, stepSec: 0.8, minK: 2, maxK: 8, pPct: 75, sigma: 1.5, eigenThreshold: 0.45
       },
@@ -810,7 +819,8 @@
 
     function renderBuiltinExample(ex) {
       const profKey = profileSelect.value || ex.default_profile || "best-quality";
-      const pData = (ex.profiles && ex.profiles[profKey]) || ex;
+      const lookupKey = profKey === "balanced" ? "best-quality" : profKey;
+      const pData = (ex.profiles && (ex.profiles[profKey] || ex.profiles[lookupKey])) || ex;
       const useLlm = (profKey !== "acoustic-only") && useLlmCheck.checked;
       const useLg = useLgCheck.checked;
       const words = pData.words.map((w) => w.word);
@@ -1409,11 +1419,15 @@
       renderBuiltinExample(ex);
     }
 
+    function expectedPresetForProfile(profVal) {
+      if (profVal === "max") return "FlaxSpeaker-XL-Diar + ECAPA Fusion (powerset_ward)";
+      if (profVal === "best-quality") return "FlaxSpeaker-XL-Diar-Adapt Auto (powerset_ward)";
+      return "Universal Auto (ECAPA powerset_ward)";
+    }
+
     profileSelect.addEventListener("change", () => {
-      if (profileSelect.value === "max") {
-        presetSelect.value = "FlaxSpeaker-XL Auto (powerset_ward)";
-      } else if (currentSource.type === "builtin") {
-        presetSelect.value = "Universal Auto (ECAPA powerset_ward)";
+      if (currentSource.type === "builtin") {
+        presetSelect.value = expectedPresetForProfile(profileSelect.value);
       }
       if (lastLiveResult) {
         if (currentSource.file) {
@@ -1437,11 +1451,9 @@
     runBtn.addEventListener("click", () => {
       if (currentSource.type === "builtin") {
         const ex = BUILTIN_EXAMPLES[currentSource.index];
-        const expectedPreset = profileSelect.value === "max"
-          ? "FlaxSpeaker-XL Auto (powerset_ward)"
-          : "Universal Auto (ECAPA powerset_ward)";
+        const expectedPreset = expectedPresetForProfile(profileSelect.value);
         const paramsUnchanged = (
-          presetSelect.value === expectedPreset &&
+          (presetSelect.value === expectedPreset || presetSelect.value === ex.preset_name) &&
           parseInt(numSpkRange.value, 10) === ex.num_speakers &&
           asrSelect.value === (ex.asr_model || "openai/whisper-base.en")
         );

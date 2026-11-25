@@ -18,7 +18,12 @@ _PRESET_MAP = {
     "meeting": configs.MEETING_MULTISPK_PRESET,
     "auto": configs.UNIVERSAL_AUTO_PRESET,
     "universal": configs.UNIVERSAL_AUTO_PRESET,
-    "flaxspeaker": configs.FLAXSPEAKER_XL_PRESET,
+    "flaxspeaker": configs.FLAXSPEAKER_XL_DIAR_PRESET,
+    "flaxspeaker-diar": configs.FLAXSPEAKER_XL_DIAR_PRESET,
+    "flaxspeaker-xl-diar": configs.FLAXSPEAKER_XL_DIAR_PRESET,
+    "flaxspeaker-v2-diar": configs.FLAXSPEAKER_V2_DIAR_PRESET,
+    "flaxspeaker-ecapa-fusion": configs.FLAXSPEAKER_DIAR_ECAPA_FUSION_PRESET,
+    "fusion": configs.FLAXSPEAKER_DIAR_ECAPA_FUSION_PRESET,
     "flaxspeaker-large": configs.FLAXSPEAKER_LARGE_PRESET,
     "flaxspeaker-v2": configs.FLAXSPEAKER_V2_PRESET,
     "flaxspeaker-xl": configs.FLAXSPEAKER_XL_PRESET,
@@ -45,7 +50,8 @@ def main() -> None:
       choices=sorted(configs.PIPELINE_PROFILE_ALIASES.keys()),
       help=(
           "High-level quality/speed profile: best-quality (default), "
-          "max (FlaxSpeaker-XL), fast (E4B-v2), or acoustic-only."
+          "max (dual-encoder fusion), balanced (ECAPA + 12B-v1), "
+          "fast (E4B-v2), or acoustic-only."
       ),
   )
   parser.add_argument(
@@ -145,13 +151,12 @@ def main() -> None:
     preset = _PRESET_MAP.get(args.preset.lower(), prof.diarization)
   else:
     preset = prof.diarization
-  if args.encoder_model or args.diarization_mode:
-    preset_kwargs = {}
-    if args.encoder_model:
-      preset_kwargs["encoder_name"] = args.encoder_model
-    if args.diarization_mode:
-      preset_kwargs["diarization_mode"] = args.diarization_mode
-    preset = dataclasses.replace(preset, **preset_kwargs)
+  if args.encoder_model:
+    preset = configs.adapt_preset_for_encoder(
+        preset, args.encoder_model, diarization_mode=args.diarization_mode
+    )
+  elif args.diarization_mode:
+    preset = dataclasses.replace(preset, diarization_mode=args.diarization_mode)
   if args.llm_model is not None:
     llm_model = (
         None

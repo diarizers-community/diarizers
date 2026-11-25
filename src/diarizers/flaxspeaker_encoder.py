@@ -26,6 +26,10 @@ except ImportError:  # pragma: no cover
 
 
 FLAXSPEAKER_PRESET_MODELS = (
+    "wq2012/univ_full_eres2conformer_xl_diar_adapt",
+    "wq2012/univ_full_eres2conformer_xl_diar_pfas",
+    "wq2012/univ_full_eres2conformer_v2_diar",
+    "wq2012/univ_full_eres2conformer_xl_diar",
     "wq2012/univ_full_eres2conformer_xl",
     "wq2012/univ_full_eres2conformer_v2_large",
     "wq2012/univ_full_eres2conformer_large",
@@ -33,6 +37,52 @@ FLAXSPEAKER_PRESET_MODELS = (
     "wq2012/univ_full_eres2conformer_v2_pfas",
     "wq2012/univ_full_eres2conformer_large_pfas",
 )
+
+
+def is_flaxspeaker_diar_config(cfg: Dict[str, Any]) -> bool:
+  """Returns True when ``cfg`` belongs to a diarization-trained checkpoint."""
+  if not isinstance(cfg, dict):
+    return False
+  prov = cfg.get("training_provenance", {})
+  if isinstance(prov, dict):
+    crop_str = str(prov.get("crop_frames", "")).strip()
+    if "-" in crop_str:
+      try:
+        min_crop = int(crop_str.split("-", 1)[0].strip())
+        if 0 < min_crop <= 100:
+          return True
+      except ValueError:
+        pass
+  exp_d = cfg.get("experiment_dict", {})
+  if isinstance(exp_d, dict):
+    tr_cfg = exp_d.get("train", {})
+    if isinstance(tr_cfg, dict):
+      min_seq = tr_cfg.get("min_seq_len")
+      if isinstance(min_seq, (int, float)) and 0 < int(min_seq) <= 100:
+        return True
+    exp_cfg = exp_d.get("export", {})
+    if isinstance(exp_cfg, dict) and "_diar" in str(exp_cfg).lower():
+      return True
+  return False
+
+
+def is_flaxspeaker_diar_model_id(name: Optional[str]) -> bool:
+  """Returns True when ``name`` is a diarization-trained FlaxSpeaker model."""
+  if not name or not is_flaxspeaker_model_id(name):
+    return False
+  s_name = str(name)
+  base = os.path.basename(s_name.rstrip("/\\")).lower()
+  if "_diar" in base or "_diar" in s_name.lower():
+    return True
+  cfg_path = os.path.join(s_name, "config.json")
+  if os.path.isfile(cfg_path):
+    try:
+      with open(cfg_path, "r", encoding="utf-8") as fh:
+        cfg = json.load(fh)
+      return is_flaxspeaker_diar_config(cfg)
+    except Exception:
+      return False
+  return False
 
 
 def is_flaxspeaker_model_id(name: Optional[str]) -> bool:
@@ -740,6 +790,7 @@ if nn is not None:
 
     def __init__(self, cfg: Dict[str, Any], atp_num_heads: int = 16):
       super().__init__()
+      self.is_diar_model: bool = is_flaxspeaker_diar_config(cfg)
       exp_d = cfg.get("experiment_dict", {})
       m_cfg = exp_d.get("model", {})
       e_cfg = m_cfg.get("eres2conformer", {})
@@ -1047,23 +1098,43 @@ if nn is not None:
               )
           return out
 
-      if os.path.isdir(repo_id_or_dir):
-        cfg_path = os.path.join(repo_id_or_dir, "config.json")
-        st_path = os.path.join(repo_id_or_dir, "model.safetensors")
+      resolved_src = str(repo_id_or_dir)
+      if not os.path.isdir(resolved_src):
+        model_root = os.environ.get(
+            "DIARIZERS_MODEL_DIR", "/tmp/diarizers_models"
+        )
+        slug = resolved_src.split("/")[-1]
+        for cand_dir in (
+            os.path.join(model_root, "flaxspeaker", slug),
+            os.path.join(model_root, slug),
+        ):
+          if os.path.isfile(os.path.join(cand_dir, "config.json")) and (
+              os.path.isfile(os.path.join(cand_dir, "model.safetensors"))
+          ):
+            resolved_src = cand_dir
+            break
+
+      if os.path.isdir(resolved_src):
+        cfg_path = os.path.join(resolved_src, "config.json")
+        st_path = os.path.join(resolved_src, "model.safetensors")
       else:
         from huggingface_hub import hf_hub_download
 
         cfg_path = hf_hub_download(
-            repo_id=repo_id_or_dir, filename="config.json"
+            repo_id=resolved_src, filename="config.json"
         )
         st_path = hf_hub_download(
-            repo_id=repo_id_or_dir, filename="model.safetensors"
+            repo_id=resolved_src, filename="model.safetensors"
         )
 
       with open(cfg_path, "r", encoding="utf-8") as fh:
         cfg = json.load(fh)
       raw: Dict[str, np.ndarray] = _read_safetensors_np(st_path)
-      return cls.from_config_and_tensors(cfg, raw, device=device)
+      model = cls.from_config_and_tensors(cfg, raw, device=device)
+      model.is_diar_model = bool(
+          model.is_diar_model or is_flaxspeaker_diar_model_id(repo_id_or_dir)
+      )
+      return model
 
     @classmethod
     def from_config_and_tensors(

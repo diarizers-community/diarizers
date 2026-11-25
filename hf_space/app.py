@@ -1,4 +1,4 @@
-"""Gradio 5.50.0 CPU end-to-end audio demo for Diarizers v1.1.0."""
+"""Gradio 5.50.0 CPU end-to-end audio demo for Diarizers v1.2.0."""
 
 from __future__ import annotations
 
@@ -27,13 +27,17 @@ PROFILE_LABELS = {
         "(~7.6 GiB RAM, 2x faster, 4.13% WDER)"
     ): "fast",
     (
-        "best-quality — ECAPA + Gemma-4-12B-v1 "
-        "(~14.3 GiB RAM, 3.88% WDER)"
+        "best-quality — FlaxSpeaker-XL-Diar-Adapt + Gemma-4-12B-v1 "
+        "(3.82% micro / 5.16% macro WDER, 0.177 MAE)"
     ): "best-quality",
     (
-        "max — FlaxSpeaker-XL + Gemma-4-12B-v1 "
-        "(3.49% CALLHOME / 6.33% ICSI)"
+        "max — FlaxSpeaker-XL-Diar-Adapt + ECAPA Fusion + Gemma-4-12B-v1 "
+        "(3.79% micro / 5.14% macro WDER, 7.92% AMI)"
     ): "max",
+    (
+        "balanced — ECAPA + Gemma-4-12B-v1 "
+        "(15x faster encoder, ~14.3 GiB RAM, 3.88% WDER)"
+    ): "balanced",
     (
         "acoustic-only — ECAPA powerset_ward "
         "(<2 GiB RAM, no LLM)"
@@ -43,8 +47,19 @@ DEFAULT_PROFILE_LABEL = next(iter(PROFILE_LABELS.keys()))
 
 PRESET_LABELS = {
     "Profile Default (Recommended)": None,
+    "FlaxSpeaker-XL-Diar-Adapt Auto (powerset_ward)": (
+        diarizers.FLAXSPEAKER_XL_DIAR_PRESET
+    ),
+    "FlaxSpeaker-XL-Diar + ECAPA Fusion (powerset_ward)": (
+        diarizers.FLAXSPEAKER_DIAR_ECAPA_FUSION_PRESET
+    ),
+    "FlaxSpeaker-V2-Diar Auto (compact powerset_ward)": (
+        diarizers.FLAXSPEAKER_V2_DIAR_PRESET
+    ),
     "Universal Auto (ECAPA powerset_ward)": diarizers.UNIVERSAL_AUTO_PRESET,
-    "FlaxSpeaker-XL Auto (powerset_ward)": diarizers.FLAXSPEAKER_XL_PRESET,
+    "FlaxSpeaker-XL Auto (legacy VoxCeleb powerset_ward)": (
+        diarizers.FLAXSPEAKER_XL_PRESET
+    ),
     "FlaxSpeaker-Large Auto (powerset_ward)": (
         diarizers.FLAXSPEAKER_LARGE_PRESET
     ),
@@ -288,17 +303,17 @@ def run_audio_pipeline(
 
 
 def build_demo() -> gr.Blocks:
-  """Builds the Gradio Blocks interface for Diarizers v1.1.0."""
+  """Builds the Gradio Blocks interface for Diarizers v1.2.0."""
   with gr.Blocks(
-      title="Diarizers v1.1.0 — End-to-End Audio ASR + Diarization + LLM"
+      title="Diarizers v1.2.0 — End-to-End Audio ASR + Diarization + LLM"
   ) as demo:
     gr.Markdown(
-        "# 🎙️ Diarizers v1.1.0 — End-to-End Open-Source ASR, Speaker "
+        "# 🎙️ Diarizers v1.2.0 — End-to-End Open-Source ASR, Speaker "
         "Diarization & DiarizationLM\n"
         "> End-to-end Apache-2.0/MIT audio pipeline combining **Whisper ASR** "
-        "+ **`powerset_ward` (`pyannote/segmentation-3.0` + `ECAPA-TDNN` / "
+        "+ **`powerset_ward` (`pyannote/segmentation-3.0` + "
         "[`FlaxSpeaker`](https://github.com/wq2012/FlaxSpeaker) "
-        "`SimAM-ERes2Conformer`)** + "
+        "`univ_full_eres2conformer_xl_diar_adapt` / `ECAPA-TDNN`)** + "
         "**[`DiarizationLM-Gemma-4-12B-v1`]"
         "(https://huggingface.co/diarizers-community/"
         "DiarizationLM-Gemma-4-12B-v1)** / "

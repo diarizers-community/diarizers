@@ -910,11 +910,13 @@ class ECAPASpectralDiarizer:
       encoder: Optional[Any] = None,
       segmentation_model: Optional[Any] = "default",
       segmentation_fn: Optional[Any] = None,
+      secondary_encoder: Optional[Any] = None,
   ):
     self.preset = preset
     self.device = device
     self.batch_size = batch_size
     self.encoder = encoder
+    self.secondary_encoder = secondary_encoder
     self.segmentation_fn = segmentation_fn
     if segmentation_model == "default":
       self.segmentation_model_spec = preset.segmentation_model
@@ -948,21 +950,50 @@ class ECAPASpectralDiarizer:
   def _is_flaxspeaker(encoder: Any) -> bool:
     return bool(getattr(encoder, "is_flaxspeaker_encoder", False))
 
+  @staticmethod
+  def _is_flaxspeaker_diar(
+      encoder: Any, encoder_name: Optional[str] = None
+  ) -> bool:
+    if bool(getattr(encoder, "is_diar_model", False)):
+      return True
+    return flaxspeaker_encoder.is_flaxspeaker_diar_model_id(encoder_name)
+
+  def _load_encoder_by_name(self, model_name: str) -> Any:
+    if flaxspeaker_encoder.is_flaxspeaker_model_id(model_name):
+      return flaxspeaker_encoder.FlaxSpeakerERes2Conformer.from_pretrained(
+          model_name, device=self.device
+      )
+    return SpeechBrainECAPATDNN.from_pretrained(model_name, device=self.device)
+
   def _ensure_encoder(self) -> Any:
     if self.encoder is None:
-      if flaxspeaker_encoder.is_flaxspeaker_model_id(
-          self.preset.encoder_name
-      ):
-        self.encoder = (
-            flaxspeaker_encoder.FlaxSpeakerERes2Conformer.from_pretrained(
-                self.preset.encoder_name, device=self.device
-            )
-        )
-      else:
-        self.encoder = SpeechBrainECAPATDNN.from_pretrained(
-            self.preset.encoder_name, device=self.device
-        )
+      self.encoder = self._load_encoder_by_name(self.preset.encoder_name)
     return self.encoder
+
+  def _ensure_secondary_encoder(self) -> Optional[Any]:
+    if self.secondary_encoder is not None:
+      return self.secondary_encoder
+    sec_name = getattr(self.preset, "secondary_encoder_name", None)
+    if not sec_name or str(sec_name).strip().lower() in ("", "none", "off"):
+      return None
+    self.secondary_encoder = self._load_encoder_by_name(str(sec_name))
+    return self.secondary_encoder
+
+  def _resolve_flaxspeaker_cmvn_mode(
+      self, encoder: Any, encoder_name: Optional[str] = None
+  ) -> str:
+    raw_mode = (
+        str(getattr(self.preset, "flaxspeaker_cmvn_mode", "auto") or "auto")
+        .strip()
+        .lower()
+    )
+    if raw_mode in ("segment", "seg"):
+      return "segment"
+    if raw_mode in ("recording", "rec"):
+      return "recording"
+    if self._is_flaxspeaker_diar(encoder, encoder_name):
+      return "segment"
+    return "recording"
 
   def _ensure_segmentation_model(self) -> Optional[Any]:
     if self._seg_mod is not None:
@@ -1207,6 +1238,53 @@ class ECAPASpectralDiarizer:
     stacked = np.stack([e for e in out_list if e is not None], axis=0)
     return spectral.l2_normalize_rows(stacked)
 
+  def _prepare_powerset_fbank(
+      self,
+      waveform: np.ndarray,
+      sample_rate: int,
+      chunk_starts: np.ndarray,
+      ps_argmax: np.ndarray,
+      encoder: Any,
+      encoder_name: Optional[str],
+  ) -> Tuple[np.ndarray, bool]:
+    """Computes `(T, 80)` log-mel features and `(fb, per_track_cmvn)`."""
+    if self._is_flaxspeaker(encoder):
+      fb_raw = flaxspeaker_encoder.compute_flaxspeaker_log_mel(
+          waveform, sample_rate=sample_rate, apply_agc=True, apply_cmvn=False
+      )
+      cmvn_mode = self._resolve_flaxspeaker_cmvn_mode(encoder, encoder_name)
+      if cmvn_mode == "segment":
+        return np.asarray(fb_raw, dtype=np.float32), True
+      n_fb = int(fb_raw.shape[0])
+      n_seg_frames = ps_argmax.shape[1]
+      frame_dt_full = 10.0 / float(n_seg_frames)
+      active_10ms = np.zeros(n_fb, dtype=bool)
+      for ci, cs_sec in enumerate(chunk_starts):
+        f0 = int(round(float(cs_sec) * 100.0))
+        f1 = min(n_fb, f0 + 1000)
+        if f1 <= f0:
+          continue
+        t_rel = np.arange(f1 - f0, dtype=np.float32) * 0.01
+        seg_i = np.clip(
+            (t_rel / frame_dt_full).astype(np.int32), 0, n_seg_frames - 1
+        )
+        active_10ms[f0:f1] |= ps_argmax[ci, seg_i] > 0
+      if int(active_10ms.sum()) >= 50:
+        rec_mean = np.mean(fb_raw[active_10ms], axis=0, keepdims=True)
+      else:
+        rec_mean = np.mean(fb_raw, axis=0, keepdims=True)
+      return (fb_raw - rec_mean).astype(np.float32), False
+
+    fb_raw_t = compute_log_mel_fbank(
+        waveform, sample_rate=sample_rate, apply_cmvn=True
+    )
+    fb_rec = (
+        fb_raw_t.numpy()
+        if hasattr(fb_raw_t, "numpy")
+        else np.asarray(fb_raw_t, dtype=np.float32)
+    )
+    return np.asarray(fb_rec, dtype=np.float32), False
+
   def _run_powerset_ward(
       self,
       waveform: np.ndarray,
@@ -1227,46 +1305,34 @@ class ECAPASpectralDiarizer:
       return None
 
     encoder = self._ensure_encoder()
+    enc_name = getattr(self.preset, "encoder_name", None)
     is_fs = self._is_flaxspeaker(encoder)
-    if is_fs:
-      fb_raw = flaxspeaker_encoder.compute_flaxspeaker_log_mel(
-          waveform, sample_rate=sample_rate, apply_agc=True, apply_cmvn=False
-      )
-    else:
-      fb_raw_t = compute_log_mel_fbank(
-          waveform, sample_rate=sample_rate, apply_cmvn=True
-      )
-      fb_raw = (
-          fb_raw_t.numpy()
-          if hasattr(fb_raw_t, "numpy")
-          else np.asarray(fb_raw_t, dtype=np.float32)
+    is_diar = self._is_flaxspeaker_diar(encoder, enc_name)
+    fb_base, per_track_cmvn = self._prepare_powerset_fbank(
+        waveform, sample_rate, chunk_starts, ps_argmax, encoder, enc_name
+    )
+
+    sec_w = float(getattr(self.preset, "secondary_fusion_weight", 0.35))
+    sec_encoder = (
+        self._ensure_secondary_encoder() if 0.0 < sec_w < 1.0 else None
+    )
+    sec_fb: Optional[np.ndarray] = None
+    sec_per_track_cmvn = False
+    if sec_encoder is not None:
+      sec_name = getattr(self.preset, "secondary_encoder_name", None)
+      sec_fb, sec_per_track_cmvn = self._prepare_powerset_fbank(
+          waveform, sample_rate, chunk_starts, ps_argmax, sec_encoder, sec_name
       )
 
-    n_fb = int(fb_raw.shape[0])
+    n_fb = int(fb_base.shape[0])
+    if sec_fb is not None:
+      n_fb = min(n_fb, int(sec_fb.shape[0]))
     frame_dt_full = 10.0 / float(n_seg_frames)
-    if is_fs:
-      active_10ms = np.zeros(n_fb, dtype=bool)
-      for ci, cs_sec in enumerate(chunk_starts):
-        f0 = int(round(float(cs_sec) * 100.0))
-        f1 = min(n_fb, f0 + 1000)
-        if f1 <= f0:
-          continue
-        t_rel = np.arange(f1 - f0, dtype=np.float32) * 0.01
-        seg_i = np.clip(
-            (t_rel / frame_dt_full).astype(np.int32), 0, n_seg_frames - 1
-        )
-        active_10ms[f0:f1] |= ps_argmax[ci, seg_i] > 0
-      if int(active_10ms.sum()) >= 50:
-        rec_mean = np.mean(fb_raw[active_10ms], axis=0, keepdims=True)
-      else:
-        rec_mean = np.mean(fb_raw, axis=0, keepdims=True)
-      fb_rec = (fb_raw - rec_mean).astype(np.float32)
-    else:
-      fb_rec = np.asarray(fb_raw, dtype=np.float32)
 
     min_ext_sec = float(getattr(self.preset, "min_extract_sec", 0.4))
     min_ext_frames = max(20, int(round(min_ext_sec * 100.0)))
     tracks: List[np.ndarray] = []
+    sec_tracks: List[np.ndarray] = []
     cs_meta_list: List[List[float]] = []
     for ci, cs_sec in enumerate(chunk_starts):
       f0 = int(round(float(cs_sec) * 100.0))
@@ -1278,13 +1344,22 @@ class ECAPASpectralDiarizer:
           (t_rel / frame_dt_full).astype(np.int32), 0, n_seg_frames - 1
       )
       cls_10ms = ps_argmax[ci, seg_i]
-      fb_chunk = fb_rec[f0:f1]
+      fb_chunk = fb_base[f0:f1]
+      sec_chunk = sec_fb[f0:f1] if sec_fb is not None else None
       for s_local in (0, 1, 2):
         mask_clean = cls_10ms == (s_local + 1)
         n_clean = int(mask_clean.sum())
         if n_clean < min_ext_frames:
           continue
-        tracks.append(fb_chunk[mask_clean].astype(np.float32))
+        seg_p = fb_chunk[mask_clean]
+        if per_track_cmvn:
+          seg_p = seg_p - np.mean(seg_p, axis=0, keepdims=True)
+        tracks.append(seg_p.astype(np.float32))
+        if sec_chunk is not None:
+          seg_s = sec_chunk[mask_clean]
+          if sec_per_track_cmvn:
+            seg_s = seg_s - np.mean(seg_s, axis=0, keepdims=True)
+          sec_tracks.append(seg_s.astype(np.float32))
         cs_meta_list.append([float(ci), float(s_local), n_clean * 0.01])
 
     if not tracks:
@@ -1292,6 +1367,17 @@ class ECAPASpectralDiarizer:
 
     cs_meta = np.asarray(cs_meta_list, dtype=np.float32)
     emb_all = self._encode_variable_tracks(encoder, tracks)
+    if sec_encoder is not None and sec_tracks:
+      emb_sec = self._encode_variable_tracks(sec_encoder, sec_tracks)
+      emb_all = spectral.l2_normalize_rows(
+          np.concatenate(
+              [
+                  math.sqrt(1.0 - sec_w) * emb_all,
+                  math.sqrt(sec_w) * emb_sec,
+              ],
+              axis=1,
+          )
+      )
     durs = cs_meta[:, 2]
     lo_k = (
         int(num_speakers)
@@ -1322,13 +1408,13 @@ class ECAPASpectralDiarizer:
     sel_emb = emb_all[use_mask]
     sel_dur = durs[use_mask]
     sel_cids = np.round(cs_meta[use_mask, 0]).astype(np.int32)
-    merge_thr = float(
-        getattr(
-            self.preset,
-            "ward_merge_threshold",
-            0.70 if is_fs else 0.60,
-        )
+    default_thr = (
+        0.72
+        if sec_encoder is not None
+        else (0.75 if is_diar else (0.70 if is_fs else 0.60))
     )
+    raw_thr = getattr(self.preset, "ward_merge_threshold", None)
+    merge_thr = float(default_thr if raw_thr is None else raw_thr)
     raw_min_spk_sec = float(getattr(self.preset, "min_cluster_sec", 8.0))
     min_spk_sec = min(raw_min_spk_sec, 0.08 * float(np.sum(sel_dur)))
     labels = spectral.ward_cluster_auto_k(

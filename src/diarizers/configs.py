@@ -6,6 +6,9 @@ import dataclasses
 from typing import Optional
 
 
+from diarizers import flaxspeaker_encoder
+
+
 SPEAKER_PREFIX = "<speaker:"
 SPEAKER_SUFFIX = ">"
 PROMPT_PREFIX = ""
@@ -43,6 +46,16 @@ DEFAULT_ECAPA_MODEL = "speechbrain/spkrec-ecapa-voxceleb"
 DEFAULT_FLAXSPEAKER_LARGE_MODEL = "wq2012/univ_full_eres2conformer_large"
 DEFAULT_FLAXSPEAKER_V2_MODEL = "wq2012/univ_full_eres2conformer_v2_large"
 DEFAULT_FLAXSPEAKER_XL_MODEL = "wq2012/univ_full_eres2conformer_xl"
+DEFAULT_FLAXSPEAKER_V2_DIAR_MODEL = "wq2012/univ_full_eres2conformer_v2_diar"
+DEFAULT_FLAXSPEAKER_XL_DIAR_BASE_MODEL = (
+    "wq2012/univ_full_eres2conformer_xl_diar"
+)
+DEFAULT_FLAXSPEAKER_XL_DIAR_MODEL = (
+    "wq2012/univ_full_eres2conformer_xl_diar_adapt"
+)
+DEFAULT_FLAXSPEAKER_XL_DIAR_PFAS_MODEL = (
+    "wq2012/univ_full_eres2conformer_xl_diar_pfas"
+)
 DEFAULT_LLM_MODEL_V1 = "diarizers-community/DiarizationLM-Gemma-4-E4B-v1"
 DEFAULT_LLM_MODEL_V2 = "diarizers-community/DiarizationLM-Gemma-4-E4B-v2"
 DEFAULT_LLM_MODEL_12B = "diarizers-community/DiarizationLM-Gemma-4-12B-v1"
@@ -89,6 +102,9 @@ class DiarizationPreset:
   chunk_window_weight: str = "uniform"
   prob_smooth_sec: float = 0.25
   em_iters: int = 5
+  flaxspeaker_cmvn_mode: str = "auto"
+  secondary_encoder_name: Optional[str] = None
+  secondary_fusion_weight: float = 0.35
 
 
 @dataclasses.dataclass
@@ -97,7 +113,7 @@ class DiarizersConfig:
 
   asr: ASRConfig = dataclasses.field(default_factory=ASRConfig)
   diarization: DiarizationPreset = dataclasses.field(
-      default_factory=lambda: UNIVERSAL_AUTO_PRESET
+      default_factory=lambda: FLAXSPEAKER_XL_DIAR_PRESET
   )
   prompt: PromptConfig = dataclasses.field(default_factory=PromptConfig)
   llm_model_or_path: Optional[str] = DEFAULT_LLM_MODEL_12B
@@ -220,6 +236,63 @@ FLAXSPEAKER_XL_PRESET = DiarizationPreset(
     balanced_centering_beta=1.0,
     chunk_window_weight="uniform",
     prob_smooth_sec=0.25,
+    flaxspeaker_cmvn_mode="recording",
+)
+
+FLAXSPEAKER_V2_DIAR_PRESET = DiarizationPreset(
+    name="flaxspeaker_v2_diar_auto",
+    segmentation_model="pyannote/segmentation-3.0",
+    encoder_name=DEFAULT_FLAXSPEAKER_V2_DIAR_MODEL,
+    window_frames=200,
+    step_frames=100,
+    min_clusters=1,
+    max_clusters=10,
+    diarization_mode="powerset_ward",
+    ward_merge_threshold=0.75,
+    min_clean_sec=1.0,
+    min_cluster_sec=8.0,
+    balanced_centering_beta=1.0,
+    chunk_window_weight="uniform",
+    prob_smooth_sec=0.25,
+    flaxspeaker_cmvn_mode="segment",
+)
+
+FLAXSPEAKER_XL_DIAR_PRESET = DiarizationPreset(
+    name="flaxspeaker_xl_diar_auto",
+    segmentation_model="pyannote/segmentation-3.0",
+    encoder_name=DEFAULT_FLAXSPEAKER_XL_DIAR_MODEL,
+    window_frames=200,
+    step_frames=100,
+    min_clusters=1,
+    max_clusters=10,
+    diarization_mode="powerset_ward",
+    ward_merge_threshold=0.75,
+    min_clean_sec=1.0,
+    min_cluster_sec=8.0,
+    balanced_centering_beta=1.0,
+    chunk_window_weight="uniform",
+    prob_smooth_sec=0.25,
+    flaxspeaker_cmvn_mode="segment",
+)
+
+FLAXSPEAKER_DIAR_ECAPA_FUSION_PRESET = DiarizationPreset(
+    name="flaxspeaker_diar_ecapa_fusion_auto",
+    segmentation_model="pyannote/segmentation-3.0",
+    encoder_name=DEFAULT_FLAXSPEAKER_XL_DIAR_MODEL,
+    window_frames=200,
+    step_frames=100,
+    min_clusters=1,
+    max_clusters=10,
+    diarization_mode="powerset_ward",
+    ward_merge_threshold=0.72,
+    min_clean_sec=1.0,
+    min_cluster_sec=8.0,
+    balanced_centering_beta=1.0,
+    chunk_window_weight="uniform",
+    prob_smooth_sec=0.25,
+    flaxspeaker_cmvn_mode="segment",
+    secondary_encoder_name=DEFAULT_ECAPA_MODEL,
+    secondary_fusion_weight=0.35,
 )
 
 UNIVERSAL_AUTO_PRESET = DiarizationPreset(
@@ -239,27 +312,61 @@ UNIVERSAL_AUTO_PRESET = DiarizationPreset(
     prob_smooth_sec=0.25,
 )
 
+
+def adapt_preset_for_encoder(
+    preset: DiarizationPreset,
+    encoder_name: str,
+    diarization_mode: Optional[str] = None,
+) -> DiarizationPreset:
+  """Updates ``preset`` with calibrated CMVN & Ward thresholds for encoder."""
+  is_diar = flaxspeaker_encoder.is_flaxspeaker_diar_model_id(encoder_name)
+  is_fs = flaxspeaker_encoder.is_flaxspeaker_model_id(encoder_name)
+  thr = 0.75 if is_diar else (0.70 if is_fs else 0.60)
+  cmvn = "segment" if is_diar else ("recording" if is_fs else "auto")
+  kwargs = {
+      "encoder_name": encoder_name,
+      "ward_merge_threshold": thr,
+      "flaxspeaker_cmvn_mode": cmvn,
+      "secondary_encoder_name": None,
+  }
+  if diarization_mode is not None:
+    kwargs["diarization_mode"] = diarization_mode
+  return dataclasses.replace(preset, **kwargs)
+
+
 BEST_QUALITY_PROFILE = PipelineProfile(
     name="best-quality",
     asr_model=DEFAULT_ASR_MODEL,
-    diarization=UNIVERSAL_AUTO_PRESET,
+    diarization=FLAXSPEAKER_XL_DIAR_PRESET,
     llm_model_or_path=DEFAULT_LLM_MODEL_12B,
     use_locality_gate=True,
     description=(
-        "Best overall accuracy (3.88% micro / 5.25% macro WDER): "
-        "fast ECAPA powerset_ward + DiarizationLM-Gemma-4-12B-v1."
+        "Best single-encoder accuracy (3.82% micro / 5.16% macro WDER, "
+        "0.177 SpkCntMAE): FlaxSpeaker-XL-Diar-Adapt + Gemma-4-12B-v1."
     ),
 )
 
 MAX_PROFILE = PipelineProfile(
     name="max",
     asr_model=DEFAULT_ASR_MODEL,
-    diarization=FLAXSPEAKER_XL_PRESET,
+    diarization=FLAXSPEAKER_DIAR_ECAPA_FUSION_PRESET,
     llm_model_or_path=DEFAULT_LLM_MODEL_12B,
     use_locality_gate=True,
     description=(
-        "Maximum multi-speaker accuracy (3.49% CALLHOME / 6.33% ICSI WDER): "
-        "FlaxSpeaker SimAM-ERes2Conformer-XL + DiarizationLM-Gemma-4-12B-v1."
+        "Maximum SOTA dual-encoder accuracy (3.79% micro / 5.14% macro WDER, "
+        "7.92% AMI): FlaxSpeaker-XL-Diar-Adapt + ECAPA fusion + Gemma-4-12B-v1."
+    ),
+)
+
+BALANCED_PROFILE = PipelineProfile(
+    name="balanced",
+    asr_model=DEFAULT_ASR_MODEL,
+    diarization=UNIVERSAL_AUTO_PRESET,
+    llm_model_or_path=DEFAULT_LLM_MODEL_12B,
+    use_locality_gate=True,
+    description=(
+        "15x faster CPU speaker encoder with 12B LLM (3.88% micro / 5.25% "
+        "macro WDER): ECAPA powerset_ward + DiarizationLM-Gemma-4-12B-v1."
     ),
 )
 
@@ -290,6 +397,7 @@ ACOUSTIC_ONLY_PROFILE = PipelineProfile(
 PIPELINE_PROFILES = {
     "best-quality": BEST_QUALITY_PROFILE,
     "max": MAX_PROFILE,
+    "balanced": BALANCED_PROFILE,
     "fast": FAST_PROFILE,
     "acoustic-only": ACOUSTIC_ONLY_PROFILE,
 }
@@ -299,15 +407,21 @@ PIPELINE_PROFILE_ALIASES = {
     "best": "best-quality",
     "quality": "best-quality",
     "default": "best-quality",
+    "flaxspeaker": "best-quality",
+    "flaxspeaker-diar": "best-quality",
     "max": "max",
-    "flaxspeaker": "max",
+    "fusion": "max",
+    "flaxspeaker-fusion": "max",
     "best-flaxspeaker": "max",
     "max-multispk": "max",
     "gpu": "max",
+    "balanced": "balanced",
+    "ecapa-12b": "balanced",
+    "cpu-12b": "balanced",
     "fast": "fast",
-    "balanced": "fast",
     "lite": "fast",
     "cpu": "fast",
+    "e4b": "fast",
     "acoustic-only": "acoustic-only",
     "no-llm": "acoustic-only",
     "realtime": "acoustic-only",

@@ -368,7 +368,7 @@ class TestSpectralAndDiarization(unittest.TestCase):
     )
     self.assertEqual(
         configs.DEFAULT_DIARIZERS_CONFIG.diarization,
-        configs.UNIVERSAL_AUTO_PRESET,
+        configs.FLAXSPEAKER_XL_DIAR_PRESET,
     )
     self.assertEqual(
         configs.DEFAULT_DIARIZERS_CONFIG.llm_model_or_path,
@@ -1705,17 +1705,31 @@ class TestV2PowersetFlaxSpeakerAndLLM(unittest.TestCase):
         p_best.llm_model_or_path,
         "diarizers-community/DiarizationLM-Gemma-4-12B-v1",
     )
-    self.assertEqual(p_best.diarization, configs.UNIVERSAL_AUTO_PRESET)
+    self.assertEqual(p_best.diarization, configs.FLAXSPEAKER_XL_DIAR_PRESET)
     self.assertEqual(diarizers.resolve_pipeline_profile("best"), p_best)
     self.assertEqual(diarizers.resolve_pipeline_profile("default"), p_best)
+    self.assertEqual(
+        diarizers.resolve_pipeline_profile("flaxspeaker"), p_best
+    )
 
     p_max = diarizers.resolve_pipeline_profile("max")
-    self.assertEqual(p_max.diarization, configs.FLAXSPEAKER_XL_PRESET)
+    self.assertEqual(
+        p_max.diarization, configs.FLAXSPEAKER_DIAR_ECAPA_FUSION_PRESET
+    )
     self.assertEqual(
         p_max.llm_model_or_path,
         "diarizers-community/DiarizationLM-Gemma-4-12B-v1",
     )
-    self.assertEqual(diarizers.resolve_pipeline_profile("flaxspeaker"), p_max)
+    self.assertEqual(diarizers.resolve_pipeline_profile("fusion"), p_max)
+    self.assertEqual(diarizers.resolve_pipeline_profile("gpu"), p_max)
+
+    p_bal = diarizers.resolve_pipeline_profile("balanced")
+    self.assertEqual(p_bal.diarization, configs.UNIVERSAL_AUTO_PRESET)
+    self.assertEqual(
+        p_bal.llm_model_or_path,
+        "diarizers-community/DiarizationLM-Gemma-4-12B-v1",
+    )
+    self.assertEqual(diarizers.resolve_pipeline_profile("ecapa-12b"), p_bal)
 
     p_fast = diarizers.resolve_pipeline_profile("fast")
     self.assertEqual(p_fast.diarization, configs.UNIVERSAL_AUTO_PRESET)
@@ -1723,7 +1737,7 @@ class TestV2PowersetFlaxSpeakerAndLLM(unittest.TestCase):
         p_fast.llm_model_or_path,
         "diarizers-community/DiarizationLM-Gemma-4-E4B-v2",
     )
-    self.assertEqual(diarizers.resolve_pipeline_profile("balanced"), p_fast)
+    self.assertEqual(diarizers.resolve_pipeline_profile("lite"), p_fast)
 
     p_ac = diarizers.resolve_pipeline_profile("acoustic-only")
     self.assertIsNone(p_ac.llm_model_or_path)
@@ -1735,7 +1749,8 @@ class TestV2PowersetFlaxSpeakerAndLLM(unittest.TestCase):
     # 2. DiarizersPipeline.from_pretrained / from_profile (lazy init, 0 network)
     pipe_default = diarizers.DiarizersPipeline.from_pretrained()
     self.assertEqual(
-        pipe_default.diarizer_backend.preset, configs.UNIVERSAL_AUTO_PRESET
+        pipe_default.diarizer_backend.preset,
+        configs.FLAXSPEAKER_XL_DIAR_PRESET,
     )
     assert pipe_default.llm_refiner is not None
     self.assertEqual(
@@ -1752,7 +1767,13 @@ class TestV2PowersetFlaxSpeakerAndLLM(unittest.TestCase):
 
     pipe_max = diarizers.DiarizersPipeline.from_pretrained(profile="max")
     self.assertEqual(
-        pipe_max.diarizer_backend.preset, configs.FLAXSPEAKER_XL_PRESET
+        pipe_max.diarizer_backend.preset,
+        configs.FLAXSPEAKER_DIAR_ECAPA_FUSION_PRESET,
+    )
+
+    pipe_bal = diarizers.DiarizersPipeline.from_pretrained(profile="balanced")
+    self.assertEqual(
+        pipe_bal.diarizer_backend.preset, configs.UNIVERSAL_AUTO_PRESET
     )
 
     pipe_ac = diarizers.DiarizersPipeline.from_pretrained(
@@ -1787,6 +1808,171 @@ class TestV2PowersetFlaxSpeakerAndLLM(unittest.TestCase):
         filename="DiarizationLM-Gemma-4-E4B-v2-q4_k_m.gguf",
     )
     self.assertTrue(fake_llama.Llama.called)
+
+  def test_v1_2_0_diar_models_segment_cmvn_and_dual_encoder_fusion(
+      self,
+  ) -> None:
+    import diarizers
+    from diarizers import flaxspeaker_encoder as fse
+
+    # 1. Diarization checkpoint ID & config provenance detection
+    for diar_id in (
+        "wq2012/univ_full_eres2conformer_xl_diar",
+        "wq2012/univ_full_eres2conformer_xl_diar_adapt",
+        "wq2012/univ_full_eres2conformer_xl_diar_pfas",
+        "wq2012/univ_full_eres2conformer_v2_diar",
+    ):
+      self.assertTrue(fse.is_flaxspeaker_model_id(diar_id))
+      self.assertTrue(fse.is_flaxspeaker_diar_model_id(diar_id))
+
+    for vox_id in (
+        "wq2012/univ_full_eres2conformer_xl",
+        "wq2012/univ_full_eres2conformer_v2_large",
+        "wq2012/univ_full_eres2conformer_large",
+    ):
+      self.assertTrue(fse.is_flaxspeaker_model_id(vox_id))
+      self.assertFalse(fse.is_flaxspeaker_diar_model_id(vox_id))
+    self.assertFalse(
+        fse.is_flaxspeaker_diar_model_id("speechbrain/spkrec-ecapa-voxceleb")
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      diar_dir = os.path.join(tmpdir, "custom_ckpt")
+      os.makedirs(diar_dir, exist_ok=True)
+      with open(
+          os.path.join(diar_dir, "config.json"), "w", encoding="utf-8"
+      ) as fh:
+        json.dump(
+            {
+                "model_type": "flaxspeaker",
+                "training_provenance": {"crop_frames": "90-220"},
+            },
+            fh,
+        )
+      self.assertTrue(fse.is_flaxspeaker_diar_model_id(diar_dir))
+
+      vox_dir = os.path.join(tmpdir, "vox_ckpt")
+      os.makedirs(vox_dir, exist_ok=True)
+      with open(
+          os.path.join(vox_dir, "config.json"), "w", encoding="utf-8"
+      ) as fh:
+        json.dump(
+            {
+                "model_type": "flaxspeaker",
+                "training_provenance": {"crop_frames": "140-200"},
+            },
+            fh,
+        )
+      self.assertFalse(fse.is_flaxspeaker_diar_model_id(vox_dir))
+
+    # 2. adapt_preset_for_encoder calibrates CMVN & Ward merge thresholds
+    adapted_diar = diarizers.adapt_preset_for_encoder(
+        configs.UNIVERSAL_AUTO_PRESET,
+        "wq2012/univ_full_eres2conformer_v2_diar",
+    )
+    self.assertAlmostEqual(adapted_diar.ward_merge_threshold, 0.75)
+    self.assertEqual(adapted_diar.flaxspeaker_cmvn_mode, "segment")
+    self.assertIsNone(adapted_diar.secondary_encoder_name)
+
+    adapted_vox = diarizers.adapt_preset_for_encoder(
+        configs.FLAXSPEAKER_DIAR_ECAPA_FUSION_PRESET,
+        "wq2012/univ_full_eres2conformer_xl",
+    )
+    self.assertAlmostEqual(adapted_vox.ward_merge_threshold, 0.70)
+    self.assertEqual(adapted_vox.flaxspeaker_cmvn_mode, "recording")
+    self.assertIsNone(adapted_vox.secondary_encoder_name)
+
+    adapted_ecapa = diarizers.adapt_preset_for_encoder(
+        configs.FLAXSPEAKER_XL_DIAR_PRESET,
+        "speechbrain/spkrec-ecapa-voxceleb",
+    )
+    self.assertAlmostEqual(adapted_ecapa.ward_merge_threshold, 0.60)
+
+    # 3. End-to-end _run_powerset_ward segment-CMVN vs recording-CMVN & fusion
+    if diarization.torch is not None:
+      import torch
+
+      class _FakeSegMod(diarization.nn.Module):
+
+        def forward(self, wav_b):
+          bsz = wav_b.shape[0]
+          lp = torch.full((bsz, 589, 7), -20.0)
+          # First half single-speaker 0 (class 1), second half speaker 1 (2)
+          lp[:, :290, 1] = 0.0
+          lp[:, 290:, 2] = 0.0
+          return torch.log_softmax(lp, dim=-1)
+
+        def to_multilabel(self, lp, soft=True):
+          del soft
+          probs = torch.exp(lp)
+          m = torch.zeros((lp.shape[0], lp.shape[1], 3))
+          m[:, :, 0] = probs[:, :, 1]
+          m[:, :, 1] = probs[:, :, 2]
+          return m
+
+      class _RecordingFlaxEnc(diarization.nn.Module):
+        is_flaxspeaker_encoder = True
+
+        def __init__(self, is_diar: bool):
+          super().__init__()
+          self.is_diar_model = is_diar
+          self.seen_means = []
+
+        def forward(self, x, mask=None):
+          for row in range(x.shape[0]):
+            ln = int(mask[row].sum().item()) if mask is not None else x.shape[1]
+            seg_mean = x[row, :ln].mean(dim=0).abs().max().item()
+            self.seen_means.append(seg_mean)
+          out = torch.zeros((x.shape[0], 8))
+          for row in range(x.shape[0]):
+            out[row, row % 2] = 1.0
+          return out
+
+      class _RecordingSecEnc(diarization.nn.Module):
+
+        def __init__(self):
+          super().__init__()
+          self.call_rows = 0
+
+        def forward(self, x):
+          self.call_rows += int(x.shape[0])
+          out = torch.zeros((x.shape[0], 6))
+          for row in range(x.shape[0]):
+            out[row, row % 2] = 1.0
+          return out
+
+      sr = 16000
+      t = np.linspace(0, 10.0, 10 * sr, endpoint=False, dtype=np.float32)
+      # Non-stationary amplitude/frequency so recording-mean != segment-mean
+      wav = np.concatenate([
+          0.15 * np.sin(2 * np.pi * 220.0 * t[:5 * sr]),
+          0.45 * np.sin(2 * np.pi * 880.0 * t[5 * sr:]),
+      ]).astype(np.float32)
+
+      diar_enc = _RecordingFlaxEnc(is_diar=True)
+      sec_enc = _RecordingSecEnc()
+      d_fuse = diarization.ECAPASpectralDiarizer(
+          preset=configs.FLAXSPEAKER_DIAR_ECAPA_FUSION_PRESET,
+          encoder=diar_enc,
+          secondary_encoder=sec_enc,
+          segmentation_model=_FakeSegMod(),
+      )
+      turns_fuse = d_fuse(wav, num_speakers=2)
+      self.assertGreaterEqual(len(turns_fuse), 2)
+      self.assertGreater(len(diar_enc.seen_means), 0)
+      for sm in diar_enc.seen_means:
+        self.assertLess(sm, 1e-4)
+      self.assertEqual(sec_enc.call_rows, len(diar_enc.seen_means))
+
+      vox_enc = _RecordingFlaxEnc(is_diar=False)
+      d_vox = diarization.ECAPASpectralDiarizer(
+          preset=configs.FLAXSPEAKER_XL_PRESET,
+          encoder=vox_enc,
+          segmentation_model=_FakeSegMod(),
+      )
+      turns_vox = d_vox(wav, num_speakers=2)
+      self.assertGreaterEqual(len(turns_vox), 2)
+      self.assertGreater(max(vox_enc.seen_means), 1e-2)
 
 
 if __name__ == "__main__":
